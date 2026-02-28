@@ -1,0 +1,54 @@
+# 依賴目錄
+node_modules/
+.bun/
+
+# Zig 編譯產物
+zig-cache/
+zig-lib/
+build/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+
+# 編譯輸出
+dist/
+out/
+
+# 環境變數
+.env
+.env.local
+.env.*.local
+
+# IDE / 編輯器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.sublime-workspace
+
+# macOS
+.AppleDouble
+.LSOverride
+*.dSYM/
+
+# Linux
+.directory
+
+# 執行檔與可執行產物
+*.exe
+ma-chill
+/ma-chill
+
+# 日誌
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# 臨時檔案
+*.tmp
+.cache/
