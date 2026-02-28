@@ -3,6 +3,7 @@ node_modules/
 .bun/
 
 # Zig 編譯產物
+**/.zig-cache/
 zig-cache/
 zig-lib/
 build/
