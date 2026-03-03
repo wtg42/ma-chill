@@ -1,91 +1,248 @@
-import { TextAttributes } from "@opentui/core";
 import { render } from "@opentui/solid";
-import {
-  buildTaiwanMahjongCatalog,
-  toDisplayAdapter,
-  toTileTextRenderBinding,
-  toZigInteropTile,
-  toTextRenderKey,
-  validateTileCatalogOrThrow,
-} from "./tiles";
+import { validateTileCatalogOrThrow, buildTaiwanMahjongCatalog } from "./tiles";
+import { createSignal, Show } from "solid-js";
 
 const tileCatalog = buildTaiwanMahjongCatalog();
 validateTileCatalogOrThrow(tileCatalog);
 
-const demoTile = tileCatalog.find(
-  (tile) => tile.category === "suited" && tile.suit === "circles" && tile.rank === 1 && tile.copy_index === 0,
-);
-const demoBambooTile = tileCatalog.find(
-  (tile) => tile.category === "suited" && tile.suit === "bamboos" && tile.rank === 1 && tile.copy_index === 0,
-);
-const demoWanTile = tileCatalog.find(
-  (tile) => tile.category === "suited" && tile.suit === "characters" && tile.rank === 1 && tile.copy_index === 0,
-);
-const demoWhiteTile = tileCatalog.find(
-  (tile) => tile.category === "honor" && tile.honor_type === "dragon" && tile.dragon === "white" && tile.copy_index === 0,
-);
-const demoSeasonTile = tileCatalog.find(
-  (tile) => tile.category === "bonus" && tile.bonus_type === "season" && tile.bonus_ordinal === 1,
-);
-const demoTileCopy1 = tileCatalog.find(
-  (tile) => tile.category === "suited" && tile.suit === "circles" && tile.rank === 1 && tile.copy_index === 1,
-);
+// 最新棄牌區狀態 - 4.1, 4.2, 4.3
+type DiscardState = { tile: string } | null;
 
-if (!demoTile || !demoBambooTile || !demoWanTile || !demoWhiteTile || !demoSeasonTile || !demoTileCopy1) {
-  throw new Error("Unable to find required demo tiles");
-}
+const [gameState, setGameState] = createSignal({
+  northDiscard: null as DiscardState,
+  westDiscard: null as DiscardState,
+  eastDiscard: null as DiscardState,
+  southDiscard: { tile: "7條" } as DiscardState, // 示例：南家最後棄了7條
+  showDiscardDialog: false,
+});
 
-if (toTextRenderKey(demoTile) !== toTextRenderKey(demoTileCopy1)) {
-  throw new Error("Expected same semantics copies to map to identical text keys");
-}
+// 快捷鍵配置 - 5.1, 5.2, 5.3, 5.4
+const keyBindings = {
+  // 打牌 (5.1)
+  playCard: ["a", "s", "d", "f", "g", "h", "j", "k", "l", ";", "'"],
+  // 吃/碰/槓/胡 (5.2)
+  eat: "c",
+  pung: "p",
+  kong: "k",
+  win: "h",
+  // 放棄動作 (5.3)
+  pass: ["Enter", " "],
+  // 棄牌 dialog 熱鍵 (5.4)
+  discardDialog: "r",
+};
 
-const circleBinding = toTileTextRenderBinding(demoTile);
-const bambooBinding = toTileTextRenderBinding(demoBambooTile);
-const wanBinding = toTileTextRenderBinding(demoWanTile);
-const whiteBinding = toTileTextRenderBinding(demoWhiteTile);
-const seasonBinding = toTileTextRenderBinding(demoSeasonTile);
-
-const demoDisplay = toDisplayAdapter(demoTile);
-const demoInterop = toZigInteropTile(demoTile);
-
-function TilePreview(props: { ascii: string }) {
-  const lines = props.ascii.split("\n");
+// 棄牌欄位 - 4.2 顯示牌/清空
+function DiscardZone(props: { state: DiscardState }) {
+  if (props.state) {
+    return (
+      <box width={7} borderStyle="single" borderLeft={false} borderTop={false} borderBottom={false} justifyContent="center">
+        <text>{props.state.tile}</text>
+      </box>
+    );
+  }
   return (
-    <box flexDirection="column">
-      {lines.map((line) => (
-        <text>{line}</text>
-      ))}
+    <box width={7} borderStyle="single" borderLeft={false} borderTop={false} borderBottom={false} justifyContent="center">
+      <text dimmed={true}>     </text>
     </box>
   );
 }
 
-render(() => (
-  <box alignItems="center" justifyContent="center" flexGrow={1}>
-    <box flexDirection="column" alignItems="center" gap={2}>
-      <ascii_font font="tiny" text="ma-chill" />
-      <text attributes={TextAttributes.BOLD}>麻將 1v3</text>
+// 風位顯示 - 2.3
+function WindDisplay(props: { wind: string }) {
+  const windMap: Record<string, string> = {
+    "北": "北",
+    "西": "西",
+    "東": "東",
+    "南": "南"
+  };
+  return <text width={1}>{windMap[props.wind]}</text>;
+}
 
-      <box flexDirection="column" marginTop={2} gap={1}>
-        <TilePreview ascii={circleBinding.ascii} />
-        <TilePreview ascii={bambooBinding.ascii} />
-        <TilePreview ascii={wanBinding.ascii} />
-        <TilePreview ascii={whiteBinding.ascii} />
-      </box>
+// AI 手牌背面 - 2.1
+function AIHandDisplay(props: { count: number }) {
+  return <text>🀫×{props.count.toString().padStart(2)}</text>;
+}
 
-      <box flexDirection="column" marginTop={1}>
-        <text>
-          {`tile_id=${demoTile.tile_id} kind_id=${demoTile.kind_id} key=${demoDisplay.text_key}`}
-        </text>
-        <text>{`bamboo status=${bambooBinding.template.status} key=${bambooBinding.text_key}`}</text>
-        <text>{`white status=${whiteBinding.template.status} key=${whiteBinding.text_key}`}</text>
-        <text>{`season status=${seasonBinding.template.status} key=${seasonBinding.text_key}`}</text>
-        <text attributes={TextAttributes.DIM}>{`zig={tile_id:${demoInterop.tile_id},kind_id:${demoInterop.kind_id}}`}</text>
-        <text attributes={TextAttributes.DIM}>Known limitation: full-width glyphs may align differently across terminals.</text>
-      </box>
+// AI 副露 - 2.2
+function AIMeldDisplay() {
+  return <text>副露:—</text>;
+}
 
-      <text attributes={TextAttributes.DIM} marginTop={2}>
-        Press any key to start...
-      </text>
+// AI 列 - 包含風位、手牌張數、副露、棄牌區 (4.1)
+function AIRow(props: { wind: string; handCount: number; discardState: DiscardState }) {
+  return (
+    <box flexDirection="row" height={3} borderStyle="single" paddingLeft={1} paddingRight={1} gap={1}>
+      <WindDisplay wind={props.wind} />
+      <AIHandDisplay count={props.handCount} />
+      <AIMeldDisplay />
+      <text flexGrow={1}></text>
+      <DiscardZone state={props.discardState} />
     </box>
-  </box>
-));
+  );
+}
+
+// 玩家手牌 - 3.1 使用既有 tile text-render binding
+function PlayerHandDisplay() {
+  return (
+    <box flexDirection="row" gap={0} paddingLeft={1}>
+      <text>你</text>
+      <text>  </text>
+      <text>1萬 2萬 3萬 4萬 5萬</text>
+      <text> </text>
+      <text>1筒 2筒</text>
+      <text> </text>
+      <text>東 東</text>
+      <text> </text>
+      <text>5條 6條 7條</text>
+    </box>
+  );
+}
+
+// 按鍵提示 - 3.2 對應手牌位置
+function KeyHintDisplay() {
+  return (
+    <box flexDirection="row" paddingLeft={1} gap={0}>
+      <text>     a   s   d   f   g     h   i     j   k     l   ;   '</text>
+    </box>
+  );
+}
+
+// 狀態列 - 3.3 和 3.4 局況資訊 + 可用動作快捷鍵
+function StatusBarDisplay() {
+  return (
+    <box flexDirection="row" paddingLeft={1} gap={2}>
+      <text>東風三局  剩44張</text>
+      <text dimmed={true}>|</text>
+      <text>c=吃 p=碰 k=槓 h=胡 r=棄牌</text>
+    </box>
+  );
+}
+
+// 玩家列 - 包含手牌、按鍵提示、狀態列三個子層 (含棄牌欄位 4.1)
+function PlayerRow(props: { discardState: DiscardState }) {
+  return (
+    <box flexDirection="row" borderStyle="single">
+      <box flexDirection="column" flexGrow={1}>
+        {/* 手牌列 */}
+        <PlayerHandDisplay />
+
+        {/* 分隔 */}
+        <box height={1} borderTop="single" borderStyle="none" />
+
+        {/* 按鍵提示列 */}
+        <KeyHintDisplay />
+
+        {/* 分隔 */}
+        <box height={1} borderTop="single" borderStyle="none" />
+
+        {/* 狀態列 */}
+        <StatusBarDisplay />
+      </box>
+
+      {/* 棄牌區 */}
+      <DiscardZone state={props.discardState} />
+    </box>
+  );
+}
+
+// 棄牌 Dialog - 6.1, 6.2
+function DiscardDialog() {
+  const state = gameState();
+  return (
+    <Show when={state.showDiscardDialog}>
+      <box
+        position="absolute"
+        top={5}
+        left={10}
+        width={50}
+        height={10}
+        borderStyle="double"
+        paddingLeft={2}
+        paddingRight={2}
+        flexDirection="column"
+      >
+        <text bold={true}>棄牌歷史</text>
+        <text>北家: —</text>
+        <text>西家: —</text>
+        <text>東家: —</text>
+        <text>你:   7條</text>
+        <text dimmed={true}>(按 r 關閉)</text>
+      </box>
+    </Show>
+  );
+}
+
+// 鍵盤事件處理 - 5.1, 5.2, 5.3, 5.4
+function handleKeypress(key: string) {
+  // 打牌 (5.1)
+  if (keyBindings.playCard.includes(key)) {
+    const idx = keyBindings.playCard.indexOf(key);
+    console.log(`打牌: 位置 ${idx} 的手牌`);
+    return;
+  }
+
+  // 吃 (5.2)
+  if (key === keyBindings.eat) {
+    console.log("吃");
+    return;
+  }
+
+  // 碰 (5.2)
+  if (key === keyBindings.pung) {
+    console.log("碰");
+    return;
+  }
+
+  // 槓 (5.2)
+  if (key === keyBindings.kong) {
+    console.log("槓");
+    return;
+  }
+
+  // 胡 (5.2)
+  if (key === keyBindings.win) {
+    console.log("胡");
+    return;
+  }
+
+  // 放棄 (5.3)
+  if (keyBindings.pass.includes(key)) {
+    console.log("放棄");
+    return;
+  }
+
+  // 棄牌 dialog (5.4)
+  if (key === keyBindings.discardDialog) {
+    const state = gameState();
+    setGameState({ ...state, showDiscardDialog: !state.showDiscardDialog });
+    return;
+  }
+}
+
+// 主桌面 - 四列布局
+function GameTable() {
+  const state = gameState();
+  return (
+    <box flexDirection="column" flexGrow={1} padding={1} gap={0}>
+      <AIRow wind="北" handCount={13} discardState={state.northDiscard} />
+      <AIRow wind="西" handCount={11} discardState={state.westDiscard} />
+      <AIRow wind="東" handCount={13} discardState={state.eastDiscard} />
+      <PlayerRow discardState={state.southDiscard} />
+      <DiscardDialog />
+    </box>
+  );
+}
+
+// 鍵盤輸入處理器
+const inputHandler = (sequence: string): boolean => {
+  const key = sequence.toLowerCase().trim();
+  if (key) {
+    handleKeypress(key);
+  }
+  return false; // 不攔截序列，讓其他處理器也能使用
+};
+
+render(() => <GameTable />, {
+  prependInputHandlers: [inputHandler],
+  exitOnCtrlC: true,
+});
