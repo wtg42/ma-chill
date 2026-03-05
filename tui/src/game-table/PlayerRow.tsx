@@ -2,10 +2,12 @@ import { JSX, For, createMemo } from "solid-js";
 import type { CanonicalTile } from "../tiles/types";
 import { renderTileTextTemplate, resolveTileTextTemplateByKey } from "../tiles/text-render";
 import { toTextRenderKey } from "../tiles/display";
+import { DiscardPanel } from "./DiscardPanel";
 
 interface PlayerRowProps {
   hand: CanonicalTile[];
   drawnTile?: CanonicalTile | null;
+  latestDiscard?: CanonicalTile | null;
 }
 
 interface TileRenderData {
@@ -104,17 +106,23 @@ export function PlayerRow(props: PlayerRowProps): JSX.Element {
   };
 
   return (
-    <box flexDirection="column" height={20} borderStyle="single" gap={0}>
-      {/* Main content - hand + info panel */}
-      <box flexDirection="row" flexGrow={1} gap={0} paddingLeft={1}>
-        <box flexDirection="column" flexGrow={1}>
-          {renderHand()}
+    <box flexDirection="row">
+      {/* Main player area */}
+      <box flexDirection="column" height={20} flexGrow={1} borderStyle="single" gap={0}>
+        {/* Main content - hand + drawn tile panel */}
+        <box flexDirection="row" flexGrow={1} gap={0} paddingLeft={1}>
+          <box flexDirection="column" flexGrow={1}>
+            {renderHand()}
+          </box>
+          {renderInfoPanel()}
         </box>
-        {renderInfoPanel()}
+
+        {/* Status bar at bottom */}
+        {renderStatusBar()}
       </box>
 
-      {/* Status bar at bottom */}
-      {renderStatusBar()}
+      {/* Discard panel */}
+      <DiscardPanel tile={props.latestDiscard ?? null} height={20} />
     </box>
   );
 }

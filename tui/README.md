@@ -1,15 +1,113 @@
-# solid
+# game-table Component 設計紀錄
 
-To install dependencies:
+## 台灣麻將基礎參數
 
-```bash
-bun install
+```
+144 張 = 萬(36) + 索(36) + 筒(36) + 風(16) + 箭(12) + 花(8)
+
+起手: 每人 16 張（台灣牌，非日麻的 13 張）
+4 人 × 16 = 64 張發出，牌山剩 80 張
 ```
 
-To run:
+### 副露後手牌消長
 
-```bash
-bun dev
+| 副露類型 | 手牌變化 | 副露區變化 | 備註 |
+|---------|---------|---------|------|
+| 吃/碰   | -3      | +3      | 總牌數不變 |
+| 明槓    | -3      | +4      | 含嶺上摸 +1 棄 1，總牌數 +1 |
+| 暗槓    | -3      | +4      | 含嶺上摸 +1 棄 1，總牌數 +1 |
+
+每次槓牌會讓該玩家展示牌數 +1。
+
+---
+
+## PlayerRow 佈局設計
+
+### 設計原則
+
+- **固定最大高度**：PlayerRow 永遠佔據相同高度，不因副露出現而改變
+- **牌面不可壓縮**：自訂牌面（7 chars × 4 lines）固定尺寸，不隨視窗縮小
+- **最低視窗需求**：MIN_WIDTH = 140, MIN_HEIGHT = 40
+
+### 佈局示意
+
+```
+PlayerRow (fixed height, flexDirection="column")
+│
+├── MeldRow (fixed height = 5 行, 永遠佔位)
+│   ┌──────────────────────────────────────────────────────────┐
+│   │ [牌][牌][牌]  [背][牌][牌][背]  [牌][牌][牌]            │  <- 有副露
+│   │ (空白)                                                   │  <- 無副露
+│   └──────────────────────────────────────────────────────────┘
+│
+├── HandSection (flexGrow:1, flexDirection="row")
+│   ├── HandTiles (flexGrow:1, overflow="hidden")
+│   │   ┌─────────────────────────────────────────────────────┐
+│   │   │ [一][二][三]...[十六]  [摸]                         │
+│   │   │  a   s   d       ;     *                            │
+│   │   └─────────────────────────────────────────────────────┘
+│   │   摸牌 inline 在手牌末端，前留 gap 做視覺區隔
+│   │
+│   └── TilePanel (fixed width ~9)  <- 棄牌展示
+│       ┌─────────┐
+│       │  棄牌   │
+│       │  [牌]   │
+│       └─────────┘
+│
+└── StatusBar (fixed height ~2 行)
+    ┌──────────────────────────────────────────────────────────┐
+    │ 東風三局 剩44張 | c=吃 p=碰 k=槓 h=胡 r=棄牌            │
+    └──────────────────────────────────────────────────────────┘
 ```
 
-This project was created using `bun create tui`. [create-tui](https://git.new/create-tui) is the easiest way to get started with OpenTUI.
+### 寬度驗算（MIN_WIDTH = 140）
+
+手牌 row（最壞情況：0 副露 + 剛摸牌）:
+```
+手牌 16 × 7 = 112
+gap          =   2
+摸牌 inline  =   7
+棄牌 panel   =   9
+borders/pad  =   4
+─────────────────
+合計         = 134 < 140 ✓
+```
+
+副露 row（最壞情況：4 組全暗槓 = 16 張）:
+```
+16 × 7 = 112 < 140 ✓（副露 row 獨立計算）
+```
+
+---
+
+## Component 清單
+
+| Component | 職責 | 關鍵 props |
+|-----------|------|------------|
+| `PlayerRow` | 組裝整個玩家區，固定高度 | `hand[]`, `melds[]`, `drawnTile?`, `latestDiscard?` |
+| `MeldRow` | 固定高度容器，排列副露組 | `melds[]` |
+| `MeldGroup` | 單組副露牌面 | `tiles[]`, `type: "chi"\|"pon"\|"open_kong"\|"closed_kong"` |
+| `HandTiles` | 手牌 + 摸牌 inline + hotkeys 列 | `hand[]`, `drawnTile?`, `hotkeys[]` |
+| `TilePanel` | 單張牌顯示框（棄牌） | `tile`, `label?` |
+| `StatusBar` | 遊戲狀態 + 可用操作提示 | `roundInfo`, `remainingTiles`, `actions[]` |
+
+### 暗槓顯示規則
+
+`MeldGroup` 需依 `type` 決定牌面：
+- `closed_kong`：兩端顯示牌背 `🀫[牌][牌]🀫`
+- 其他：全部正面
+
+### TilePanel 共用說明
+
+`TilePanel` 為「顯示一張牌 or 空白」的共用 component，目前用於棄牌展示。
+摸牌 inline 進 `HandTiles`，不使用同一個佔位空間，但可共用底層的單牌渲染邏輯。
+
+---
+
+## 待細分的部分（下次討論）
+
+- [ ] `HandTiles` 內部：摸牌的 hotkey 如何標示（連續編號 or 專屬按鍵）
+- [ ] `MeldGroup` 內部：各種副露類型的視覺排版
+- [ ] `StatusBar` 內部：動作按鍵與遊戲狀態的佈局細節
+- [ ] AI 玩家 row 的對應設計（`AiPlayerRow`）
+- [ ] `TilePanel` 與手牌內 inline 摸牌的共用邏輯抽取

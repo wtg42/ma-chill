@@ -86,9 +86,49 @@ export function renderTileTextTemplate(template: TileTextTemplate): string {
   return `┌─────┐\n│${top}│\n│${bottom}│\n└─────┘`;
 }
 
+function displayWidth(s: string): number {
+  let width = 0;
+  for (const char of s) {
+    const cp = char.codePointAt(0) ?? 0;
+    // CJK Unified Ideographs, CJK Compatibility, Hangul, fullwidth forms, etc.
+    if (
+      (cp >= 0x1100 && cp <= 0x115f) ||
+      (cp >= 0x2e80 && cp <= 0x303e) ||
+      (cp >= 0x3041 && cp <= 0x33ff) ||
+      (cp >= 0x3400 && cp <= 0x4dbf) ||
+      (cp >= 0x4e00 && cp <= 0xa4cf) ||
+      (cp >= 0xa960 && cp <= 0xa97f) ||
+      (cp >= 0xac00 && cp <= 0xd7ff) ||
+      (cp >= 0xf900 && cp <= 0xfaff) ||
+      (cp >= 0xfe10 && cp <= 0xfe1f) ||
+      (cp >= 0xfe30 && cp <= 0xfe6f) ||
+      (cp >= 0xff01 && cp <= 0xff60) ||
+      (cp >= 0xffe0 && cp <= 0xffe6) ||
+      (cp >= 0x1b000 && cp <= 0x1b0ff) ||
+      (cp >= 0x1f004 && cp <= 0x1f0cf) ||
+      (cp >= 0x1f200 && cp <= 0x1f2ff) ||
+      (cp >= 0x20000 && cp <= 0x2fffd) ||
+      (cp >= 0x30000 && cp <= 0x3fffd)
+    ) {
+      width += 2;
+    } else {
+      width += 1;
+    }
+  }
+  return width;
+}
+
 function centerToFive(input: string): string {
-  const value = input.slice(0, 5);
-  const remaining = 5 - value.length;
+  // Truncate to fit within 5 display columns
+  let value = "";
+  let usedWidth = 0;
+  for (const char of input) {
+    const cw = displayWidth(char);
+    if (usedWidth + cw > 5) break;
+    value += char;
+    usedWidth += cw;
+  }
+  const remaining = 5 - usedWidth;
   const leftPad = Math.floor(remaining / 2);
   const rightPad = remaining - leftPad;
   return `${" ".repeat(leftPad)}${value}${" ".repeat(rightPad)}`;

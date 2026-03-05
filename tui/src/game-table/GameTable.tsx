@@ -49,6 +49,7 @@ export function GameTable(): JSX.Element {
         <PlayerRow
           hand={fakeData.playerHand}
           drawnTile={fakeData.lastDrawnTile}
+          latestDiscard={fakeData.playerLatestDiscard}
         />
       </box>
     </Show>

@@ -1,4 +1,19 @@
 import type { CanonicalTile } from "../tiles/types";
+import { buildTaiwanMahjongCatalog } from "../tiles/catalog";
+
+const catalog = buildTaiwanMahjongCatalog();
+
+function findSuited(suit: string, rank: number): CanonicalTile {
+  const tile = catalog.find((t) => t.category === "suited" && t.suit === suit && t.rank === rank);
+  if (!tile) throw new Error(`Tile not found: suited ${suit} ${rank}`);
+  return tile;
+}
+
+function findWind(wind: string): CanonicalTile {
+  const tile = catalog.find((t) => t.honor_type === "wind" && t.wind === wind);
+  if (!tile) throw new Error(`Tile not found: wind ${wind}`);
+  return tile;
+}
 
 /**
  * Fake game data for MVP table visualization
@@ -6,26 +21,26 @@ import type { CanonicalTile } from "../tiles/types";
 
 // 玩家手牌：16 張（起手）
 export const playerHand: CanonicalTile[] = [
-  { suit: "circles", rank: 1 },   // 1筒
-  { suit: "circles", rank: 2 },   // 2筒
-  { suit: "circles", rank: 3 },   // 3筒
-  { suit: "circles", rank: 4 },   // 4筒
-  { suit: "bamboos", rank: 1 },   // 1竹
-  { suit: "bamboos", rank: 2 },   // 2竹
-  { suit: "bamboos", rank: 3 },   // 3竹
-  { suit: "characters", rank: 1 }, // 1萬
-  { suit: "characters", rank: 2 }, // 2萬
-  { suit: "characters", rank: 3 }, // 3萬
-  { suit: "characters", rank: 4 }, // 4萬
-  { suit: "characters", rank: 5 }, // 5萬
-  { honor: "wind", wind: "east" },  // 東
-  { honor: "wind", wind: "south" }, // 南
-  { honor: "wind", wind: "west" },  // 西
-  { honor: "wind", wind: "north" }, // 北
+  findSuited("circles", 1),
+  findSuited("circles", 2),
+  findSuited("circles", 3),
+  findSuited("circles", 4),
+  findSuited("bamboos", 1),
+  findSuited("bamboos", 2),
+  findSuited("bamboos", 3),
+  findSuited("characters", 1),
+  findSuited("characters", 2),
+  findSuited("characters", 3),
+  findSuited("characters", 4),
+  findSuited("characters", 5),
+  findWind("east"),
+  findWind("south"),
+  findWind("west"),
+  findWind("north"),
 ];
 
 // 最後摸到的牌（示例）
-export const lastDrawnTile: CanonicalTile = { suit: "bamboos", rank: 5 }; // 5竹
+export const lastDrawnTile: CanonicalTile = findSuited("bamboos", 5);
 
 // AI 玩家數據
 export const aiPlayers = [
@@ -33,21 +48,21 @@ export const aiPlayers = [
     wind: "north",
     name: "北家",
     handCount: 13,
-    latestDiscard: { suit: "circles", rank: 7 } as CanonicalTile,
+    latestDiscard: findSuited("circles", 7),
   },
   {
     wind: "west",
     name: "西家",
     handCount: 13,
-    latestDiscard: { suit: "bamboos", rank: 4 } as CanonicalTile,
+    latestDiscard: findSuited("bamboos", 4),
   },
   {
     wind: "east",
     name: "東家",
     handCount: 13,
-    latestDiscard: { honor: "wind", wind: "east" } as CanonicalTile,
+    latestDiscard: findWind("east"),
   },
 ];
 
 // 玩家最新棄牌（示例）
-export const playerLatestDiscard: CanonicalTile = { suit: "characters", rank: 7 }; // 7萬
+export const playerLatestDiscard: CanonicalTile = findSuited("characters", 7);

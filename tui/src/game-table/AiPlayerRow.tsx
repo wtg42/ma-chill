@@ -1,7 +1,6 @@
-import { JSX, For, createMemo } from "solid-js";
+import { JSX, For } from "solid-js";
 import type { CanonicalTile } from "../tiles/types";
-import { renderTileTextTemplate, resolveTileTextTemplateByKey } from "../tiles/text-render";
-import { toTextRenderKey } from "../tiles/display";
+import { DiscardPanel } from "./DiscardPanel";
 
 interface AiPlayerRowProps {
   wind: string;
@@ -10,55 +9,28 @@ interface AiPlayerRowProps {
   latestDiscard: CanonicalTile | null;
 }
 
+const ROW_HEIGHT = 6;
+
 export function AiPlayerRow(props: AiPlayerRowProps): JSX.Element {
-  // Memoize discard tile rendering
-  const discardLines = createMemo(() => {
-    if (!props.latestDiscard) {
-      return null;
-    }
-    const textKey = toTextRenderKey(props.latestDiscard);
-    const template = resolveTileTextTemplateByKey(textKey);
-    const rendered = renderTileTextTemplate(template);
-    return rendered.split("\n");
-  });
-
-  // Render latest discard tile
-  const renderDiscardTile = () => {
-    const lines = discardLines();
-    if (!lines) {
-      return <text dimmed={true}>       </text>;
-    }
-    // Render tile in 3 lines format for single column display
-    return (
-      <box flexDirection="column" height={3}>
-        <For each={lines}>
-          {(line) => <text>{line}</text>}
-        </For>
-      </box>
-    );
-  };
-
   return (
-    <box flexDirection="row" height={3} borderStyle="single" paddingLeft={1} paddingRight={1} gap={1}>
-      {/* Wind position */}
-      <text width={1} justifyContent="center">
-        {props.windZh}
-      </text>
+    <box flexDirection="row">
+      {/* Hand area */}
+      <box flexDirection="row" height={ROW_HEIGHT} flexGrow={1} borderStyle="single" paddingLeft={1} paddingRight={1} gap={1} alignItems="center">
+        {/* Wind position */}
+        <text width={1} justifyContent="center">
+          {props.windZh}
+        </text>
 
-      {/* Hand tiles (face-down) */}
-      <box flexDirection="row" gap={0}>
-        <For each={Array(props.handCount)}>
-          {() => <text>🀫</text>}
-        </For>
+        {/* Hand tiles (face-down) */}
+        <box flexDirection="row" gap={0} flexGrow={1} overflow="hidden">
+          <For each={Array(props.handCount)}>
+            {() => <text>🀫</text>}
+          </For>
+        </box>
       </box>
 
-      {/* Spacer */}
-      <text flexGrow={1}></text>
-
-      {/* Latest discard */}
-      <box flexDirection="column" height={3} borderStyle="single" borderLeft={false} borderTop={false} borderBottom={false}>
-        {renderDiscardTile()}
-      </box>
+      {/* Discard panel */}
+      <DiscardPanel tile={props.latestDiscard} height={ROW_HEIGHT} />
     </box>
   );
 }
