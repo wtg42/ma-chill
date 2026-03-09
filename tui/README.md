@@ -34,7 +34,7 @@
 ```
 PlayerRow (fixed height, flexDirection="column")
 │
-├── MeldRow (fixed height = 5 行, 永遠佔位)
+├── MeldRow (fixed height = 5 行, 永遠佔位，副露在上方)
 │   ┌──────────────────────────────────────────────────────────┐
 │   │ [牌][牌][牌]  [背][牌][牌][背]  [牌][牌][牌]            │  <- 有副露
 │   │ (空白)                                                   │  <- 無副露
@@ -43,20 +43,22 @@ PlayerRow (fixed height, flexDirection="column")
 ├── HandSection (flexGrow:1, flexDirection="row")
 │   ├── HandTiles (flexGrow:1, overflow="hidden")
 │   │   ┌─────────────────────────────────────────────────────┐
-│   │   │ [一][二][三]...[十六]  [摸]                         │
-│   │   │  a   s   d       ;     *                            │
+│   │   │ [一][二][三]...[十六]   gap   [摸]                  │
+│   │   │  a   s   d       ;           space                  │
 │   │   └─────────────────────────────────────────────────────┘
-│   │   摸牌 inline 在手牌末端，前留 gap 做視覺區隔
+│   │   摸牌以 gap 視覺分離，固定鍵 space 打出
 │   │
-│   └── TilePanel (fixed width ~9)  <- 棄牌展示
+│   └── LatestTileBox (fixed width ~9)  <- 無 label，有牌才顯示
 │       ┌─────────┐
-│       │  棄牌   │
-│       │  [牌]   │
+│       │ ┌─────┐ │
+│       │ │ 牌面 │ │
+│       │ └─────┘ │
 │       └─────────┘
 │
 └── StatusBar (fixed height ~2 行)
     ┌──────────────────────────────────────────────────────────┐
     │ 東風三局 剩44張 | c=吃 p=碰 k=槓 h=胡 r=棄牌            │
+    │（不可用動作以灰色顯示，pass 為背景靜默倒數）             │
     └──────────────────────────────────────────────────────────┘
 ```
 
@@ -85,29 +87,68 @@ borders/pad  =   4
 | Component | 職責 | 關鍵 props |
 |-----------|------|------------|
 | `PlayerRow` | 組裝整個玩家區，固定高度 | `hand[]`, `melds[]`, `drawnTile?`, `latestDiscard?` |
-| `MeldRow` | 固定高度容器，排列副露組 | `melds[]` |
-| `MeldGroup` | 單組副露牌面 | `tiles[]`, `type: "chi"\|"pon"\|"open_kong"\|"closed_kong"` |
-| `HandTiles` | 手牌 + 摸牌 inline + hotkeys 列 | `hand[]`, `drawnTile?`, `hotkeys[]` |
-| `TilePanel` | 單張牌顯示框（棄牌） | `tile`, `label?` |
-| `StatusBar` | 遊戲狀態 + 可用操作提示 | `roundInfo`, `remainingTiles`, `actions[]` |
-
-### 暗槓顯示規則
-
-`MeldGroup` 需依 `type` 決定牌面：
-- `closed_kong`：兩端顯示牌背 `🀫[牌][牌]🀫`
-- 其他：全部正面
-
-### TilePanel 共用說明
-
-`TilePanel` 為「顯示一張牌 or 空白」的共用 component，目前用於棄牌展示。
-摸牌 inline 進 `HandTiles`，不使用同一個佔位空間，但可共用底層的單牌渲染邏輯。
+| `MeldRow` | 固定高度容器，排列副露組，置於手牌上方 | `melds[]` |
+| `MeldGroup` | 單組副露牌面 | `tiles[]`, `type`, `sourceTileIndex`, `viewerIsOwner` |
+| `HandTiles` | 手牌 + gap + 摸牌（space 鍵） + hotkeys 列 | `hand[]`, `drawnTile?` |
+| `LatestTileBox` | 單張牌顯示（無 label），有牌才顯示，空白佔位 | `tile` |
+| `AiPlayerRow` | 副露為主體 + 🀫×N + LatestTileBox，固定高度 | `melds[]`, `handCount`, `latestDiscard?` |
+| `StatusBar` | 遊戲狀態 + 可用操作提示（灰化不可用熱鍵） | `roundInfo`, `remainingTiles`, `actions[]` |
+| `DiscardHistoryPopup` | 全場棄牌歷史，tab 切換，僅玩家回合可開 | `discards[]` |
+| `GameInfoPopup` | 遊戲資訊（局風/局數/剩餘張數），`\` 切換 | `roundInfo` |
 
 ---
 
-## 待細分的部分（下次討論）
+## 副露顯示規則
 
-- [ ] `HandTiles` 內部：摸牌的 hotkey 如何標示（連續編號 or 專屬按鍵）
-- [ ] `MeldGroup` 內部：各種副露類型的視覺排版
-- [ ] `StatusBar` 內部：動作按鍵與遊戲狀態的佈局細節
-- [ ] AI 玩家 row 的對應設計（`AiPlayerRow`）
-- [ ] `TilePanel` 與手牌內 inline 摸牌的共用邏輯抽取
+### MeldGroup 排列規則
+
+| 副露類型 | 顯示規則 |
+|---------|---------|
+| `chi`（吃） | 來源牌強制置中，其餘按數字大小分列兩側 |
+| `pon`（碰） | 三張全正面，左至右排列 |
+| `open_kong`（明槓） | 四張全正面，左至右排列 |
+| `closed_kong`（玩家暗槓） | 四張正面牌 + dimmed 樣式 |
+| `closed_kong`（AI 暗槓） | 四張背面牌（░ 填充樣式） |
+
+### 吃牌置中範例
+```
+吃了 5筒（手有 3、4）：[3筒][5筒][4筒]
+吃了 3筒（手有 4、5）：[4筒][3筒][5筒]
+吃了 5筒（手有 3、4）正常中間：[3筒][5筒][4筒]
+```
+
+### 背面牌樣式
+
+```
+┌─────┐
+│░░░░░│
+│░░░░░│
+└─────┘
+```
+
+納入 `text-render.ts` template 系統，key 為 `"tile-back"`。
+
+---
+
+## Popup 規格
+
+| Popup | 觸發鍵 | 開啟條件 | 互斥 |
+|-------|--------|---------|------|
+| `DiscardHistoryPopup` | `tab`（toggle） | 僅玩家回合 | 與 GameInfoPopup 互斥 |
+| `GameInfoPopup` | `\`（toggle） | 任意時機 | 與 DiscardHistoryPopup 互斥 |
+
+棄牌歷史顯示：全場棄牌合併，同牌分組，一個牌圖示 + 數量。
+
+---
+
+## 互動設計
+
+- **Pass**：背景靜默倒數（預設 5 秒，可設定），不顯示計時 UI
+- **space**：固定打出摸牌，視覺上以 gap 與手牌區分
+- **不可用熱鍵**：StatusBar 灰化顯示，按下無效
+
+---
+
+## 下一個探索主題
+
+- [ ] **Zig core 架構設計**：牌局狀態機、台灣麻將規則判定、AI 決策策略、橋接協議（UDS）
