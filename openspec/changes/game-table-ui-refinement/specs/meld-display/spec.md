@@ -1,5 +1,22 @@
 ## ADDED Requirements
 
+### Requirement: 副露資料來源
+
+`MeldGroup` SHALL 從 Zig `state_update` 的副露物件讀取資料，格式如下：
+
+```json
+{
+  "type": "chi" | "pon" | "open_kong" | "closed_kong",
+  "tiles": [tile_id, tile_id, tile_id],
+  "source_index": 1
+}
+```
+
+- `source_index`：來源牌在 `tiles` 陣列中的索引，chi 時用於決定置中位置；pon/kong 時為 `null`
+- `viewerIsOwner`：TUI 自行判斷（`player_id === 0` 即為玩家本人），不由 Zig 傳送
+
+---
+
 ### Requirement: 吃牌（chi）排列規則
 
 吃牌 SHALL 顯示三張牌，來源牌（從上家吃入的牌）強制置於中間位置，其餘兩張按數字大小分列兩側（左小右大）。

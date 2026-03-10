@@ -1,5 +1,15 @@
 ## MODIFIED Requirements
 
+### Requirement: StatusBar 可用動作來源
+
+`StatusBar` SHALL 依 Zig `turn_changed` 訊息中的 `available_actions` 陣列決定哪些熱鍵可用；不在陣列中的動作以灰化樣式顯示，按下時不執行任何動作。TUI 收到 `turn_changed` 後更新本地狀態並傳遞給 StatusBar。
+
+#### Scenario: turn_changed 包含部分動作
+- **WHEN** Zig 推送 `{ "available_actions": ["chi", "win"] }`
+- **THEN** StatusBar 的 c（吃）與 h（胡）正常顯示，p（碰）、k（槓）灰化
+
+---
+
 ### Requirement: 吃碰槓胡快捷鍵
 
 當有可執行的動作時，對應快捷鍵 SHALL 生效：吃（c）、碰（p）、槓（k）、胡（h）。不可用的動作 SHALL 在 StatusBar 以灰化樣式顯示，按下時不執行任何動作。Pass（放棄）改為背景靜默倒數，不設顯式按鍵。
@@ -13,8 +23,12 @@
 - **THEN** 不執行任何動作，StatusBar 該動作顯示為灰化
 
 #### Scenario: 倒數時間到自動 pass
-- **WHEN** 玩家在可執行吃/碰/槓/胡的等待期間內未按任何動作鍵，且背景倒數（預設 5 秒）結束
-- **THEN** 系統自動執行 pass，遊戲繼續
+- **WHEN** 玩家在可執行吃/碰/槓/胡的等待期間內未按任何動作鍵，且背景倒數結束
+- **THEN** TUI 傳送 `{ type: "player_action", action: "pass" }` 給 Zig，遊戲繼續
+
+#### Scenario: pass 倒數秒數來源
+- **WHEN** TUI 收到 init 訊息
+- **THEN** TUI 從 `pass_timeout_seconds` 欄位讀取秒數；後續 pass 倒數均使用此值，不在 TUI 側硬編碼
 
 ## ADDED Requirements
 

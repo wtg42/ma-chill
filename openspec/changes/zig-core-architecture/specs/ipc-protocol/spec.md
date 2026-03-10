@@ -25,14 +25,18 @@
 ### Requirement: Zig → TUI 訊息型別定義
 系統 SHALL 支援以下 Zig → TUI 訊息：
 
-- `init`：tile catalog（144 張）+ 初始遊戲狀態（各玩家手牌、牌山剩餘、局風、局數、莊家）
+- `init`：tile catalog（144 張）+ 初始遊戲狀態（各玩家手牌、牌山剩餘、局風、局數、莊家）+ `pass_timeout_seconds`（從設定檔讀取）
 - `state_update`：全量遊戲狀態 + events[]
 - `turn_changed`：輪到誰（player_id）+ 可用動作列表（`["chi","pon","kong","win","discard"]` 子集）
 - `game_over`：勝者 player_id + 最終分數列表
 
 #### Scenario: init 觸發時機
 - **WHEN** TUI 連上 UDS socket
-- **THEN** Zig 立即推送 init 訊息
+- **THEN** Zig 立即推送 init 訊息，包含 `pass_timeout_seconds` 欄位
+
+#### Scenario: pass_timeout_seconds 來源
+- **WHEN** Zig 啟動時
+- **THEN** 從設定檔讀取 pass 倒數秒數，並在 init 訊息中傳給 TUI；TUI 收到後自行計時，倒數結束時送出 `player_action: "pass"`
 
 #### Scenario: turn_changed 觸發時機
 - **WHEN** 任何玩家完成其回合（棄牌或副露後）
