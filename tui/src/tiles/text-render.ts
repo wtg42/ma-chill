@@ -66,6 +66,15 @@ export function resolveTileTextTemplateByKey(textKey: string): TileTextTemplate 
     };
   }
 
+  if (textKey === "tile-back") {
+    return {
+      key: "tile-back",
+      top: "░░░░░",
+      bottom: "░░░░░",
+      status: "ready",
+    };
+  }
+
   throw new Error(`Unsupported text key: ${textKey}`);
 }
 

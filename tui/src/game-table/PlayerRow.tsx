@@ -2,31 +2,26 @@ import { JSX, For, createMemo } from "solid-js";
 import type { CanonicalTile } from "../tiles/types";
 import { renderTileTextTemplate, resolveTileTextTemplateByKey } from "../tiles/text-render";
 import { toTextRenderKey } from "../tiles/display";
-import { DiscardPanel } from "./DiscardPanel";
+import { MeldRow, type MeldData } from "./MeldRow";
+import { LatestTileBox } from "./LatestTileBox";
 
 interface PlayerRowProps {
   hand: CanonicalTile[];
   drawnTile?: CanonicalTile | null;
-  latestDiscard?: CanonicalTile | null;
-}
-
-interface TileRenderData {
-  tile: CanonicalTile;
-  lines: string[];
+  melds?: MeldData[];
+  availableActions?: string[];
 }
 
 export function PlayerRow(props: PlayerRowProps): JSX.Element {
-  // Hot keys for playing cards (a-z keys)
   const hotkeys = ["a", "s", "d", "f", "g", "h", "j", "k", "l", ";", "'", "z", "x", "c", "v", "b"];
+  const availableActions = createMemo(() => props.availableActions ?? []);
 
-  // Render single tile (7 chars wide × 4 lines)
   const renderTile = (tile: CanonicalTile) => {
     const textKey = toTextRenderKey(tile);
     const template = resolveTileTextTemplateByKey(textKey);
     return renderTileTextTemplate(template);
   };
 
-  // Memoize rendered tiles
   const renderedTiles = createMemo(() =>
     props.hand.map((tile) => ({
       tile,
@@ -34,12 +29,11 @@ export function PlayerRow(props: PlayerRowProps): JSX.Element {
     }))
   );
 
-  // Render player hand - all tiles on one line with hotkeys below
   const renderHand = () => {
     return (
       <box flexDirection="column" gap={0}>
-        {/* Tiles row */}
-        <box flexDirection="row" gap={0} paddingLeft={0}>
+        {/* Tiles row + LatestTileBox */}
+        <box flexDirection="row" gap={0}>
           <For each={renderedTiles()}>
             {(item) => (
               <box flexDirection="column" width={7}>
@@ -49,14 +43,48 @@ export function PlayerRow(props: PlayerRowProps): JSX.Element {
               </box>
             )}
           </For>
+
+          {/* Gap then drawn tile */}
+          <box width={2} />
+          <LatestTileBox tile={props.drawnTile ?? null} />
         </box>
 
-        {/* Hotkeys row below tiles */}
-        <box flexDirection="row" gap={0} paddingLeft={0}>
+        {/* Hotkeys row */}
+        <box flexDirection="row" gap={0}>
           <For each={props.hand}>
             {(_, idx) => (
               <text width={7} justifyContent="center">
                 {hotkeys[idx()]}
+              </text>
+            )}
+          </For>
+          <box width={2} />
+          <text width={7} justifyContent="center">space</text>
+        </box>
+      </box>
+    );
+  };
+
+  const isActionAvailable = (action: string) => availableActions().includes(action);
+
+  const renderStatusBar = () => {
+    const actions = [
+      { key: "c", label: "吃", action: "chi" },
+      { key: "p", label: "碰", action: "pon" },
+      { key: "k", label: "槓", action: "kong" },
+      { key: "h", label: "胡", action: "win" },
+      { key: "r", label: "棄牌", action: "discard" },
+    ];
+
+    return (
+      <box flexDirection="row" paddingLeft={1} gap={2} borderTop="single" borderStyle="none">
+        <text>東風三局  剩44張</text>
+        <text dimmed={true}>|</text>
+        <box flexDirection="row" gap={1}>
+          <For each={actions}>
+            {(a) => (
+              <text dimmed={!isActionAvailable(a.action)}>
+                {a.key}={a.label}
               </text>
             )}
           </For>
@@ -65,64 +93,20 @@ export function PlayerRow(props: PlayerRowProps): JSX.Element {
     );
   };
 
-  // Memoize drawn tile rendering
-  const drawnTileLines = createMemo(() => {
-    if (!props.drawnTile) return null;
-    return renderTile(props.drawnTile).split("\n");
-  });
-
-  // Render right info panel (drawn/discarded tile)
-  const renderInfoPanel = () => {
-    const lines = drawnTileLines();
-    return (
-      <box flexDirection="column" width={12} borderStyle="single" borderLeft={false} borderRight={false} paddingLeft={1} paddingRight={1} justifyContent="center">
-        {lines ? (
-          <box flexDirection="column">
-            <text bold={true}>摸牌</text>
-            <For each={lines}>
-              {(line) => <text fontSize="small">{line}</text>}
-            </For>
-          </box>
-        ) : (
-          <box flexDirection="column">
-            <text dimmed={true}>待摸</text>
-            <text dimmed={true}>       </text>
-            <text dimmed={true}>       </text>
-          </box>
-        )}
-      </box>
-    );
-  };
-
-  // Status bar with available actions
-  const renderStatusBar = () => {
-    return (
-      <box flexDirection="row" paddingLeft={1} gap={2} borderTop="single" borderStyle="none">
-        <text>東風三局  剩44張</text>
-        <text dimmed={true}>|</text>
-        <text>c=吃 p=碰 k=槓 h=胡 r=棄牌</text>
-      </box>
-    );
-  };
-
   return (
-    <box flexDirection="row">
-      {/* Main player area */}
-      <box flexDirection="column" height={20} flexGrow={1} borderStyle="single" gap={0}>
-        {/* Main content - hand + drawn tile panel */}
-        <box flexDirection="row" flexGrow={1} gap={0} paddingLeft={1}>
-          <box flexDirection="column" flexGrow={1}>
-            {renderHand()}
-          </box>
-          {renderInfoPanel()}
-        </box>
+    <box flexDirection="column" height={20} flexGrow={1} borderStyle="single" gap={0}>
+      {/* Meld row at top */}
+      <MeldRow melds={props.melds ?? []} />
 
-        {/* Status bar at bottom */}
-        {renderStatusBar()}
+      {/* Hand area */}
+      <box flexDirection="row" flexGrow={1} gap={0} paddingLeft={1}>
+        <box flexDirection="column" flexGrow={1}>
+          {renderHand()}
+        </box>
       </box>
 
-      {/* Discard panel */}
-      <DiscardPanel tile={props.latestDiscard ?? null} height={20} />
+      {/* Status bar at bottom */}
+      {renderStatusBar()}
     </box>
   );
 }
