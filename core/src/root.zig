@@ -2,6 +2,28 @@
 const std = @import("std");
 const Io = std.Io;
 
+pub const game = struct {
+    pub const tile = @import("game/tile.zig");
+    pub const deck = @import("game/deck.zig");
+    pub const state = @import("game/state.zig");
+    pub const round = @import("game/round.zig");
+};
+
+pub const ipc = struct {
+    pub const protocol = @import("ipc/protocol.zig");
+    pub const server = @import("ipc/server.zig");
+};
+
+pub const rules = struct {
+    pub const actions = @import("rules/actions.zig");
+    pub const safety = @import("rules/safety.zig");
+    pub const scoring = @import("rules/scoring.zig");
+};
+
+pub const ai = struct {
+    pub const agent = @import("ai/agent.zig");
+};
+
 /// This is a documentation comment to explain the `printAnotherMessage` function below.
 ///
 /// Accepting an `Io.Writer` instance is a handy way to write reusable code.
