@@ -116,8 +116,15 @@ core/src/
 ## Risks / Trade-offs
 
 - **台灣計番規則複雜**：scoring.zig 此 change 只定義介面，計番邏輯細節留給後續 change → 先用簡化版（只算基本台數）通過整合測試
+- **胡牌判定缺少邊界**：剩餘任務需要 `win` 合法性與完整回合結束條件，因此此 change 補充一個最小可實作的胡牌判定：僅支援標準胡型（4 組面子 + 1 對將），不含七對子、十三么等特殊牌型
 - **花牌補牌時機**：發牌與摸牌時遇到花牌需自動補牌，TUI 需要顯示補花事件 → 在 `state_update` 中加入 `events[]` 欄位記錄本回合發生的事
 - **TUI spawn 路徑**：開發時 TUI 可能尚未編譯，需支援 dev 模式（直接 `bun run src/index.tsx`） → 透過環境變數 `MA_CHILL_TUI_DEV=1` 切換
+
+## Clarifications Added During Implementation
+
+- `GameState` 補充 `scores[4]` 欄位，供 `game_over` 序列化與 AI 的 `score_sensitive` 邏輯使用
+- `win` 合法性在此 change 採用最小規格：只檢查一般型 17 張胡牌（含摸入牌）是否可拆成 4 組合法面子 + 1 對將
+- AI 的 `score_sensitive` 不需要完整策略樹；僅需依當前分數落後/領先調整風險容忍度與胡牌門檻
 
 ## Open Questions
 

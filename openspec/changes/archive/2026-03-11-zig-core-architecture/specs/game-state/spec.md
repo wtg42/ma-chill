@@ -81,3 +81,13 @@
 #### Scenario: 非玩家回合
 - **WHEN** 輪到 AI 行動或等待狀態
 - **THEN** `state_update` 的 `drawn_tile_id` 為 `null`，TUI 的 LatestTileBox 空白
+
+---
+
+### Requirement: state_update 包含當前分數
+
+系統 SHALL 在完整狀態中維護並序列化四位玩家的當前分數 `scores[4]`，供 `game_over` 顯示與 AI 的 `score_sensitive` 判斷使用。
+
+#### Scenario: AI 使用分數差距調整策略
+- **WHEN** AI 進行決策
+- **THEN** 傳入的 game state 包含四位玩家目前分數，讓 AI 可判斷自己是否落後或領先
