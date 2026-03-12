@@ -107,7 +107,7 @@ pub fn sendMessage(writer: anytype, message: Message) !void {
 }
 
 pub fn parseMessage(allocator: std.mem.Allocator, input: []const u8) !Message {
-    const trimmed = std.mem.trimRight(u8, input, "\r\n");
+    const trimmed = std.mem.trimEnd(u8, input, "\r\n");
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, trimmed, .{});
     defer parsed.deinit();
 
@@ -122,7 +122,7 @@ pub fn parseMessage(allocator: std.mem.Allocator, input: []const u8) !Message {
         const tile_catalog = try parseTileCatalog(allocator, tile_catalog_value);
         errdefer allocator.free(tile_catalog);
 
-        const state_json = try std.json.stringifyAlloc(allocator, state_value, .{});
+        const state_json = try std.json.Stringify.valueAlloc(allocator, state_value, .{});
         errdefer allocator.free(state_json);
 
         return .{ .init = .{
@@ -135,7 +135,7 @@ pub fn parseMessage(allocator: std.mem.Allocator, input: []const u8) !Message {
     if (std.mem.eql(u8, type_name, "state_update")) {
         const state_value = object.get("state") orelse return error.InvalidMessage;
         return .{ .state_update = .{
-            .state_json = try std.json.stringifyAlloc(allocator, state_value, .{}),
+            .state_json = try std.json.Stringify.valueAlloc(allocator, state_value, .{}),
         } };
     }
 

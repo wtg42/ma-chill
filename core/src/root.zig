@@ -12,6 +12,7 @@ pub const game = struct {
 pub const ipc = struct {
     pub const protocol = @import("ipc/protocol.zig");
     pub const server = @import("ipc/server.zig");
+    pub const session = @import("ipc/session.zig");
 };
 
 pub const rules = struct {
