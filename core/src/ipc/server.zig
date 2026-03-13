@@ -10,6 +10,7 @@ pub const Server = struct {
 
     pub fn deinit(self: *Server, io: Io) void {
         self.listener.deinit(io);
+        std.Io.Dir.deleteFileAbsolute(io, self.socket_path) catch {};
     }
 };
 
@@ -18,6 +19,11 @@ pub fn socketPathFromEnviron(environ_map: *const std.process.Environ.Map) []cons
 }
 
 pub fn listen(io: Io, socket_path: []const u8) !Server {
+    // 清除殘留的 socket 檔案，避免 AddressInUse
+    std.Io.Dir.deleteFileAbsolute(io, socket_path) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    };
     const address = try std.Io.net.UnixAddress.init(socket_path);
     return .{
         .listener = try address.listen(io, .{}),

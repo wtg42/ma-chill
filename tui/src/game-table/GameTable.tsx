@@ -1,30 +1,104 @@
-import { JSX, Show, createSignal } from "solid-js";
+import { JSX, Show, createSignal, createMemo } from "solid-js";
 import { useTerminalDimensions } from "./useTerminalDimensions";
 import { TooSmallWarning } from "./TooSmallWarning";
 import { AiPlayerRow } from "./AiPlayerRow";
 import { PlayerRow } from "./PlayerRow";
 import { DiscardHistoryPopup } from "./DiscardHistoryPopup";
 import { GameInfoPopup } from "./GameInfoPopup";
-import * as fakeData from "./fake-data";
+import type { GameStateStore, ZigGameState, ZigMeld } from "../game-state";
+import type { CanonicalTile } from "../tiles/types";
+import type { MeldData } from "./MeldRow";
+import type { AiMeldData } from "./AiPlayerRow";
 
 const MIN_WIDTH = 140;
 const MIN_HEIGHT = 40;
 
-// Simulate player's turn for tab key gating
-const isPlayerTurn = true;
+// Map Zig round_wind string to display character
+const ROUND_WIND_ZH: Record<string, string> = {
+  east: "東",
+  south: "南",
+  west: "西",
+  north: "北",
+};
 
-export function GameTable(): JSX.Element {
+// AI player positions: player_id 1=north, 2=west, 3=east
+const AI_POSITIONS = [
+  { playerId: 1, wind: "north", windZh: "北" },
+  { playerId: 2, wind: "west", windZh: "西" },
+  { playerId: 3, wind: "east", windZh: "東" },
+] as const;
+
+interface GameTableProps {
+  store: GameStateStore;
+}
+
+function resolveTiles(
+  catalog: Map<number, CanonicalTile>,
+  ids: number[],
+): CanonicalTile[] {
+  return ids.flatMap((id) => {
+    const t = catalog.get(id);
+    return t ? [t] : [];
+  });
+}
+
+function resolvePlayerMelds(
+  catalog: Map<number, CanonicalTile>,
+  melds: ZigMeld[],
+  viewerIsOwner: boolean,
+): MeldData[] {
+  return melds.map((meld) => ({
+    tiles: resolveTiles(catalog, meld.tiles),
+    type: meld.type,
+    sourceTileIndex: meld.source_index,
+    viewerIsOwner,
+  }));
+}
+
+function resolveAiMelds(
+  catalog: Map<number, CanonicalTile>,
+  melds: ZigMeld[],
+): AiMeldData[] {
+  return melds.map((meld) => ({
+    tiles: resolveTiles(catalog, meld.tiles),
+    type: meld.type,
+    sourceTileIndex: meld.source_index,
+    viewerIsOwner: false,
+  }));
+}
+
+function getAiPlayerData(
+  state: ZigGameState,
+  catalog: Map<number, CanonicalTile>,
+  playerId: number,
+) {
+  const player = state.players[playerId];
+  if (!player) {
+    return { handCount: 0, latestDiscard: null, melds: [] };
+  }
+  const discardTiles = resolveTiles(catalog, player.discards);
+  const latestDiscard = discardTiles.length > 0 ? (discardTiles[discardTiles.length - 1] ?? null) : null;
+  return {
+    handCount: player.hand_count ?? 0,
+    latestDiscard,
+    melds: resolveAiMelds(catalog, player.melds),
+  };
+}
+
+export function GameTable(props: GameTableProps): JSX.Element {
+  const { store } = props;
   const dimensions = useTerminalDimensions();
   const [showDiscardHistory, setShowDiscardHistory] = createSignal(false);
   const [showGameInfo, setShowGameInfo] = createSignal(false);
 
-  const isSizeValid = () => {
-    return dimensions().width >= MIN_WIDTH && dimensions().height >= MIN_HEIGHT;
-  };
+  const isSizeValid = () =>
+    dimensions().width >= MIN_WIDTH && dimensions().height >= MIN_HEIGHT;
+
+  const isPlayerTurn = createMemo(() => store.currentPlayerId() === 0);
 
   const handleKeyDown = (key: string) => {
     if (key === "tab") {
-      if (!isPlayerTurn) return;
+      if (!isPlayerTurn()) return;
       if (showDiscardHistory()) {
         setShowDiscardHistory(false);
       } else {
@@ -41,60 +115,96 @@ export function GameTable(): JSX.Element {
     }
   };
 
+  // Derived data from store
+  const catalog = () => store.tileCatalog();
+  const state = () => store.gameState();
+
+  const playerHand = createMemo(() => store.handWithIds().map((e) => e.tile));
+
+  const playerDrawnTile = createMemo(() => {
+    const s = state();
+    if (!s || s.drawn_tile_id == null) return null;
+    return catalog().get(s.drawn_tile_id) ?? null;
+  });
+
+  const playerMelds = createMemo<MeldData[]>(() => {
+    const s = state();
+    if (!s) return [];
+    const p = s.players[0];
+    if (!p) return [];
+    return resolvePlayerMelds(catalog(), p.melds, true);
+  });
+
+  const allDiscards = createMemo<CanonicalTile[]>(() => {
+    const s = state();
+    if (!s) return [];
+    return s.players.flatMap((p) => resolveTiles(catalog(), p.discards));
+  });
+
+  const gameInfo = createMemo(() => {
+    const s = state();
+    if (!s) return { roundWind: "東", roundNumber: 1, tilesRemaining: 0 };
+    return {
+      roundWind: ROUND_WIND_ZH[s.round_wind] ?? s.round_wind,
+      roundNumber: s.round_number,
+      tilesRemaining: s.wall_count,
+    };
+  });
+
   return (
     <Show
       when={isSizeValid()}
       fallback={<TooSmallWarning currentDimensions={dimensions()} />}
     >
       <box flexDirection="column" width="100%" height="100%" gap={0} onKeyDown={handleKeyDown}>
-        {/* North player */}
+        {/* North player (player_id=1) */}
         <AiPlayerRow
-          wind="north"
-          windZh="北"
-          handCount={fakeData.aiPlayers[0]!.handCount}
-          latestDiscard={fakeData.aiPlayers[0]!.latestDiscard}
-          melds={fakeData.aiPlayers[0]!.melds}
+          wind={AI_POSITIONS[0].wind}
+          windZh={AI_POSITIONS[0].windZh}
+          handCount={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[0].playerId).handCount : 0}
+          latestDiscard={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[0].playerId).latestDiscard : null}
+          melds={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[0].playerId).melds : []}
         />
 
-        {/* West player */}
+        {/* West player (player_id=2) */}
         <AiPlayerRow
-          wind="west"
-          windZh="西"
-          handCount={fakeData.aiPlayers[1]!.handCount}
-          latestDiscard={fakeData.aiPlayers[1]!.latestDiscard}
-          melds={fakeData.aiPlayers[1]!.melds}
+          wind={AI_POSITIONS[1].wind}
+          windZh={AI_POSITIONS[1].windZh}
+          handCount={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[1].playerId).handCount : 0}
+          latestDiscard={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[1].playerId).latestDiscard : null}
+          melds={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[1].playerId).melds : []}
         />
 
-        {/* East player */}
+        {/* East player (player_id=3) */}
         <AiPlayerRow
-          wind="east"
-          windZh="東"
-          handCount={fakeData.aiPlayers[2]!.handCount}
-          latestDiscard={fakeData.aiPlayers[2]!.latestDiscard}
-          melds={fakeData.aiPlayers[2]!.melds}
+          wind={AI_POSITIONS[2].wind}
+          windZh={AI_POSITIONS[2].windZh}
+          handCount={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[2].playerId).handCount : 0}
+          latestDiscard={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[2].playerId).latestDiscard : null}
+          melds={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[2].playerId).melds : []}
         />
 
-        {/* Player (South) */}
+        {/* Player (South, player_id=0) */}
         <PlayerRow
-          hand={fakeData.playerHand}
-          drawnTile={fakeData.lastDrawnTile}
-          melds={fakeData.playerMelds}
-          availableActions={fakeData.playerAvailableActions}
+          hand={playerHand()}
+          drawnTile={playerDrawnTile()}
+          melds={playerMelds()}
+          availableActions={store.availableActions()}
         />
 
         {/* Popups (mutually exclusive) */}
         <Show when={showDiscardHistory()}>
           <box position="absolute" top={4} left={4}>
-            <DiscardHistoryPopup discards={fakeData.allDiscards} />
+            <DiscardHistoryPopup discards={allDiscards()} />
           </box>
         </Show>
 
         <Show when={showGameInfo()}>
           <box position="absolute" top={4} right={4}>
             <GameInfoPopup
-              roundWind={fakeData.gameInfo.roundWind}
-              roundNumber={fakeData.gameInfo.roundNumber}
-              tilesRemaining={fakeData.gameInfo.tilesRemaining}
+              roundWind={gameInfo().roundWind}
+              roundNumber={gameInfo().roundNumber}
+              tilesRemaining={gameInfo().tilesRemaining}
             />
           </box>
         </Show>

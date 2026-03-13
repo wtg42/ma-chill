@@ -30,7 +30,8 @@ pub fn main(init: std.process.Init) !void {
 
     // 4. 初始化牌局
     var catalog = game.tile.generateCatalog();
-    var prng = std.Random.DefaultPrng.init(@intCast(std.time.milliTimestamp()));
+    const ts = std.Io.Clock.real.now(init.io);
+    var prng = std.Random.DefaultPrng.init(@intCast(ts.toMilliseconds()));
     game.deck.shuffle(prng.random(), &catalog);
 
     var game_state = try game.round.initGameState(arena, &catalog);
@@ -43,13 +44,7 @@ pub fn main(init: std.process.Init) !void {
 
     // 6. 執行遊戲迴圈
     var driver = GameDriver{ .session = &session, .pass_timeout_ms = PASS_TIMEOUT_MS };
-    const result = try game.round.playRound(
-        arena,
-        &game_state,
-        GameDriver.turnDecide.bind(&driver),
-        GameDriver.claimDecide.bind(&driver),
-        GameDriver.sink.bind(&driver),
-    );
+    const result = try game.round.playRound(arena, &game_state, &driver);
 
     // 7. 等待 TUI 結束並 log 結果
     const term = try child.wait(init.io);

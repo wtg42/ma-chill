@@ -89,7 +89,11 @@ pub fn availableActionsForPlayer(allocator: std.mem.Allocator, game_state: *cons
     return list.toOwnedSlice(allocator);
 }
 
-pub fn playRound(allocator: std.mem.Allocator, game_state: *state.GameState, turn_decider: anytype, claim_decider: anytype, sink: anytype) !RoundResult {
+/// driver: anytype — 需提供三個方法：
+///   fn turnDecide(*T, *const state.GameState, TurnChangedMessage) !PlayerActionMessage
+///   fn claimDecide(*T, *const state.GameState, u8, TurnChangedMessage) !PlayerActionMessage
+///   fn sink(*T, protocol.Message) !void
+pub fn playRound(allocator: std.mem.Allocator, game_state: *state.GameState, driver: anytype) !RoundResult {
     var pending_draw = true;
 
     while (true) {
@@ -101,17 +105,17 @@ pub fn playRound(allocator: std.mem.Allocator, game_state: *state.GameState, tur
                     .winner_id = null,
                     .scores = game_state.scores,
                 } };
-                try sink(game_over);
+                try driver.sink(game_over);
                 return .{ .winner_id = null, .scores = game_state.scores };
             }
-            try emitStateUpdate(allocator, game_state, sink);
+            try emitStateUpdate(allocator, game_state, driver);
         }
 
         var turn_changed = try buildTurnChangedMessage(allocator, game_state, game_state.current_player_id, null, null);
         defer allocator.free(turn_changed.available_actions);
-        try sink(.{ .turn_changed = turn_changed });
+        try driver.sink(.{ .turn_changed = turn_changed });
 
-        const turn_action = try turn_decider(game_state, turn_changed);
+        const turn_action = try driver.turnDecide(game_state, turn_changed);
         if (!containsAction(turn_changed.available_actions, turn_action.action)) {
             return error.IllegalAction;
         }
@@ -119,21 +123,21 @@ pub fn playRound(allocator: std.mem.Allocator, game_state: *state.GameState, tur
         switch (turn_action.action) {
             .win => {
                 applyWin(game_state, game_state.current_player_id, true);
-                try sink(.{ .game_over = .{ .winner_id = game_state.current_player_id, .scores = game_state.scores } });
+                try driver.sink(.{ .game_over = .{ .winner_id = game_state.current_player_id, .scores = game_state.scores } });
                 return .{ .winner_id = game_state.current_player_id, .scores = game_state.scores };
             },
             .kong => {
                 try applyClosedKong(game_state, turn_action.tile_id orelse return error.InvalidTile);
-                try emitStateUpdate(allocator, game_state, sink);
+                try emitStateUpdate(allocator, game_state, driver);
                 pending_draw = true;
                 continue;
             },
             .discard => {
                 const discarded_tile_id = turn_action.tile_id orelse return error.InvalidTile;
                 try discardTile(game_state, game_state.current_player_id, discarded_tile_id);
-                try emitStateUpdate(allocator, game_state, sink);
+                try emitStateUpdate(allocator, game_state, driver);
 
-                if (try resolveClaims(allocator, game_state, discarded_tile_id, claim_decider, sink)) |winner_id| {
+                if (try resolveClaims(allocator, game_state, discarded_tile_id, driver)) |winner_id| {
                     return .{ .winner_id = winner_id, .scores = game_state.scores };
                 }
 
@@ -145,10 +149,10 @@ pub fn playRound(allocator: std.mem.Allocator, game_state: *state.GameState, tur
     }
 }
 
-pub fn emitStateUpdate(allocator: std.mem.Allocator, game_state: *const state.GameState, sink: anytype) !void {
+pub fn emitStateUpdate(allocator: std.mem.Allocator, game_state: *const state.GameState, driver: anytype) !void {
     const json = try game_state.toJson(allocator);
     defer allocator.free(json);
-    try sink(.{ .state_update = .{ .state_json = json } });
+    try driver.sink(.{ .state_update = .{ .state_json = json } });
 }
 
 pub fn buildInitMessage(allocator: std.mem.Allocator, catalog: []const tile.Tile, game_state: *const state.GameState, pass_timeout_seconds: u16) !protocol.Message {
@@ -163,7 +167,7 @@ pub fn buildInitMessage(allocator: std.mem.Allocator, catalog: []const tile.Tile
     } };
 }
 
-fn resolveClaims(allocator: std.mem.Allocator, game_state: *state.GameState, discarded_tile_id: u8, claim_decider: anytype, sink: anytype) !?u8 {
+fn resolveClaims(allocator: std.mem.Allocator, game_state: *state.GameState, discarded_tile_id: u8, driver: anytype) !?u8 {
     var choices: [state.player_count - 1]?ClaimChoice = .{ null, null, null };
     var choice_count: usize = 0;
     const discarder = game_state.current_player_id;
@@ -176,8 +180,8 @@ fn resolveClaims(allocator: std.mem.Allocator, game_state: *state.GameState, dis
             continue;
         }
 
-        try sink(.{ .turn_changed = turn_changed });
-        const response = try claim_decider(game_state, discarded_tile_id, turn_changed);
+        try driver.sink(.{ .turn_changed = turn_changed });
+        const response = try driver.claimDecide(game_state, discarded_tile_id, turn_changed);
         if (!containsAction(turn_changed.available_actions, response.action)) {
             return error.IllegalAction;
         }
@@ -193,7 +197,7 @@ fn resolveClaims(allocator: std.mem.Allocator, game_state: *state.GameState, dis
     switch (selected.action) {
         .win => {
             applyWin(game_state, selected.player_id, false);
-            try sink(.{ .game_over = .{ .winner_id = selected.player_id, .scores = game_state.scores } });
+            try driver.sink(.{ .game_over = .{ .winner_id = selected.player_id, .scores = game_state.scores } });
             return selected.player_id;
         },
         .chi => try applyChiClaim(game_state, selected.player_id, discarded_tile_id),
@@ -206,7 +210,7 @@ fn resolveClaims(allocator: std.mem.Allocator, game_state: *state.GameState, dis
     }
 
     game_state.current_player_id = selected.player_id;
-    try emitStateUpdate(allocator, game_state, sink);
+    try emitStateUpdate(allocator, game_state, driver);
     return null;
 }
 
@@ -464,32 +468,23 @@ test "playRound ends in draw when wall runs out" {
     }
     try game_state.wall.append(allocator, catalog[100]);
 
-    const Sink = struct {
+    const Driver = struct {
         count: usize = 0,
-        fn handle(self: *@This(), message: protocol.Message) !void {
-            _ = message;
+        fn turnDecide(_: *@This(), gs: *const state.GameState, _: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            return .{ .action = .discard, .tile_id = gs.players[gs.current_player_id].hand.items[0].id };
+        }
+        fn claimDecide(_: *@This(), _: *const state.GameState, _: u8, _: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            return .{ .action = .pass, .tile_id = null };
+        }
+        fn sink(self: *@This(), _: protocol.Message) !void {
             self.count += 1;
         }
     };
-    const Turn = struct {
-        fn decide(gs: *state.GameState, turn_changed: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
-            _ = turn_changed;
-            return .{ .action = .discard, .tile_id = gs.players[gs.current_player_id].hand.items[0].id };
-        }
-    };
-    const Claim = struct {
-        fn decide(gs: *state.GameState, discarded_tile_id: u8, turn_changed: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
-            _ = gs;
-            _ = discarded_tile_id;
-            _ = turn_changed;
-            return .{ .action = .pass, .tile_id = null };
-        }
-    };
 
-    var sink = Sink{};
-    const result = try playRound(allocator, &game_state, Turn.decide, Claim.decide, Sink.handle.bind(&sink));
+    var driver = Driver{};
+    const result = try playRound(allocator, &game_state, &driver);
     try std.testing.expectEqual(@as(?u8, null), result.winner_id);
-    try std.testing.expect(sink.count > 0);
+    try std.testing.expect(driver.count > 0);
 }
 
 test "playRound integrates AI decisions and can end in a win" {
@@ -512,28 +507,23 @@ test "playRound integrates AI decisions and can end in a win" {
     }
     try game_state.wall.append(allocator, catalog[109]);
 
-    const Sink = struct {
+    const Driver = struct {
         game_over_seen: bool = false,
-        fn handle(self: *@This(), message: protocol.Message) !void {
+        fn turnDecide(_: *@This(), gs: *const state.GameState, turn_changed: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            return @import("../ai/agent.zig").decide(gs, turn_changed.player_id, @import("../ai/agent.zig").presets.conservative, turn_changed.available_actions);
+        }
+        fn claimDecide(_: *@This(), gs: *const state.GameState, _: u8, turn_changed: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            return @import("../ai/agent.zig").decide(gs, turn_changed.player_id, @import("../ai/agent.zig").presets.conservative, turn_changed.available_actions);
+        }
+        fn sink(self: *@This(), message: protocol.Message) !void {
             if (message == .game_over) self.game_over_seen = true;
         }
     };
-    const Turn = struct {
-        fn decide(gs: *state.GameState, turn_changed: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
-            return @import("../ai/agent.zig").decide(gs, turn_changed.player_id, @import("../ai/agent.zig").presets.conservative, turn_changed.available_actions);
-        }
-    };
-    const Claim = struct {
-        fn decide(gs: *state.GameState, discarded_tile_id: u8, turn_changed: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
-            _ = discarded_tile_id;
-            return @import("../ai/agent.zig").decide(gs, turn_changed.player_id, @import("../ai/agent.zig").presets.conservative, turn_changed.available_actions);
-        }
-    };
 
-    var sink = Sink{};
-    const result = try playRound(allocator, &game_state, Turn.decide, Claim.decide, Sink.handle.bind(&sink));
+    var driver = Driver{};
+    const result = try playRound(allocator, &game_state, &driver);
     try std.testing.expectEqual(@as(?u8, 0), result.winner_id);
-    try std.testing.expect(sink.game_over_seen);
+    try std.testing.expect(driver.game_over_seen);
 }
 
 test "emitStateUpdate serializes melds and bonus events together" {
@@ -549,7 +539,7 @@ test "emitStateUpdate serializes melds and bonus events together" {
 
     const Sink = struct {
         json: ?[]const u8 = null,
-        fn handle(self: *@This(), message: protocol.Message) !void {
+        fn sink(self: *@This(), message: protocol.Message) !void {
             switch (message) {
                 .state_update => |payload| self.json = payload.state_json,
                 else => {},
@@ -558,7 +548,7 @@ test "emitStateUpdate serializes melds and bonus events together" {
     };
 
     var sink = Sink{};
-    try emitStateUpdate(allocator, &game_state, Sink.handle.bind(&sink));
+    try emitStateUpdate(allocator, &game_state, &sink);
     const json = sink.json orelse return error.TestUnexpectedResult;
     try std.testing.expect(std.mem.indexOf(u8, json, "\"melds\":[{\"type\":\"chi\",\"tiles\":[3,4,5],\"source_index\":2}]") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"events\":[{\"type\":\"bonus_tile\",\"player_id\":2,\"tile_id\":136}]") != null);
