@@ -1,5 +1,8 @@
 const std = @import("std");
 const tile = @import("../game/tile.zig");
+const scoring = @import("../rules/scoring.zig");
+
+pub const ScoringDetail = scoring.ScoreResult;
 
 pub const ActionType = enum {
     discard,
@@ -28,6 +31,7 @@ pub const TurnChangedMessage = struct {
 pub const GameOverMessage = struct {
     winner_id: ?u8,
     scores: [4]i32,
+    scoring_detail: ?ScoringDetail,
 };
 
 pub const PlayerActionMessage = struct {
@@ -35,12 +39,15 @@ pub const PlayerActionMessage = struct {
     tile_id: ?u8,
 };
 
+pub const PlayerReadyMessage = struct {};
+
 pub const Message = union(enum) {
     init: InitMessage,
     state_update: StateUpdateMessage,
     turn_changed: TurnChangedMessage,
     game_over: GameOverMessage,
     player_action: PlayerActionMessage,
+    player_ready: PlayerReadyMessage,
 
     pub fn deinit(self: *Message, allocator: std.mem.Allocator) void {
         switch (self.*) {
@@ -50,7 +57,7 @@ pub const Message = union(enum) {
             },
             .state_update => |payload| allocator.free(payload.state_json),
             .turn_changed => |payload| allocator.free(payload.available_actions),
-            .game_over, .player_action => {},
+            .game_over, .player_action, .player_ready => {},
         }
     }
 };
@@ -92,7 +99,28 @@ pub fn sendMessage(writer: anytype, message: Message) !void {
                 }
                 try writer.print("{}", .{score});
             }
-            try writer.writeAll("]}\n");
+            try writer.writeAll("],\"scoring_detail\":");
+            if (payload.scoring_detail) |detail| {
+                try writer.writeAll("{\"total_fan\":");
+                try writer.print("{}", .{detail.total_fan});
+                try writer.writeAll(",\"lines\":[");
+                var first = true;
+                for (detail.lines[0..detail.line_count]) |line_opt| {
+                    if (line_opt) |line| {
+                        if (!first) try writer.writeByte(',');
+                        first = false;
+                        try writer.writeAll("{\"pattern\":");
+                        try writeStringValue(writer, @tagName(line.pattern));
+                        try writer.writeAll(",\"fan\":");
+                        try writer.print("{}", .{line.fan});
+                        try writer.writeByte('}');
+                    }
+                }
+                try writer.writeAll("]}");
+            } else {
+                try writer.writeAll("null");
+            }
+            try writer.writeAll("}\n");
         },
         .player_action => |payload| {
             try writer.writeAll("{\"type\":\"player_action\",\"action\":");
@@ -102,6 +130,9 @@ pub fn sendMessage(writer: anytype, message: Message) !void {
                 try writer.print("{}", .{tile_id});
             }
             try writer.writeAll("}\n");
+        },
+        .player_ready => {
+            try writer.writeAll("{\"type\":\"player_ready\"}\n");
         },
     }
 }
@@ -152,6 +183,7 @@ pub fn parseMessage(allocator: std.mem.Allocator, input: []const u8) !Message {
         return .{ .game_over = .{
             .winner_id = try parseOptionalIntField(object, "winner_id", u8),
             .scores = try parseScores(scores_value),
+            .scoring_detail = null, // TUI does not send game_over; ignore on parse
         } };
     }
 
@@ -161,6 +193,10 @@ pub fn parseMessage(allocator: std.mem.Allocator, input: []const u8) !Message {
             .action = std.meta.stringToEnum(ActionType, action_name) orelse return error.InvalidMessage,
             .tile_id = try parseOptionalIntField(object, "tile_id", u8),
         } };
+    }
+
+    if (std.mem.eql(u8, type_name, "player_ready")) {
+        return .{ .player_ready = .{} };
     }
 
     return error.InvalidMessage;
@@ -386,6 +422,7 @@ test "game_over message roundtrip" {
     const message: Message = .{ .game_over = .{
         .winner_id = null,
         .scores = .{ 10, -5, 0, -5 },
+        .scoring_detail = null,
     } };
 
     var writer: std.Io.Writer.Allocating = .init(allocator);

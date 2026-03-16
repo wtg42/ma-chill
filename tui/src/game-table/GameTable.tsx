@@ -21,12 +21,8 @@ const ROUND_WIND_ZH: Record<string, string> = {
   north: "北",
 };
 
-// AI player positions: player_id 1=north, 2=west, 3=east
-const AI_POSITIONS = [
-  { playerId: 1, wind: "north", windZh: "北" },
-  { playerId: 2, wind: "west", windZh: "西" },
-  { playerId: 3, wind: "east", windZh: "東" },
-] as const;
+// AI player screen positions (layout): player_id 1=north side, 2=west side, 3=east side
+const AI_PLAYER_IDS = [1, 2, 3] as const;
 
 interface GameTableProps {
   store: GameStateStore;
@@ -118,6 +114,7 @@ export function GameTable(props: GameTableProps): JSX.Element {
   // Derived data from store
   const catalog = () => store.tileCatalog();
   const state = () => store.gameState();
+  const seatWinds = () => store.seatWinds();
 
   const playerHand = createMemo(() => store.handWithIds().map((e) => e.tile));
 
@@ -157,39 +154,28 @@ export function GameTable(props: GameTableProps): JSX.Element {
       fallback={<TooSmallWarning currentDimensions={dimensions()} />}
     >
       <box flexDirection="column" width="100%" height="100%" gap={0} onKeyDown={handleKeyDown}>
-        {/* North player (player_id=1) */}
-        <AiPlayerRow
-          wind={AI_POSITIONS[0].wind}
-          windZh={AI_POSITIONS[0].windZh}
-          handCount={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[0].playerId).handCount : 0}
-          latestDiscard={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[0].playerId).latestDiscard : null}
-          melds={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[0].playerId).melds : []}
-        />
+        {/* AI players (player_id 1, 2, 3) */}
+        {AI_PLAYER_IDS.map((playerId) => {
+          const wind = () => seatWinds()[playerId] ?? "east";
+          const windZh = () => ROUND_WIND_ZH[wind()] ?? wind();
+          return (
+            <AiPlayerRow
+              wind={wind()}
+              windZh={windZh()}
+              handCount={state() ? getAiPlayerData(state()!, catalog(), playerId).handCount : 0}
+              latestDiscard={state() ? getAiPlayerData(state()!, catalog(), playerId).latestDiscard : null}
+              melds={state() ? getAiPlayerData(state()!, catalog(), playerId).melds : []}
+            />
+          );
+        })}
 
-        {/* West player (player_id=2) */}
-        <AiPlayerRow
-          wind={AI_POSITIONS[1].wind}
-          windZh={AI_POSITIONS[1].windZh}
-          handCount={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[1].playerId).handCount : 0}
-          latestDiscard={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[1].playerId).latestDiscard : null}
-          melds={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[1].playerId).melds : []}
-        />
-
-        {/* East player (player_id=3) */}
-        <AiPlayerRow
-          wind={AI_POSITIONS[2].wind}
-          windZh={AI_POSITIONS[2].windZh}
-          handCount={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[2].playerId).handCount : 0}
-          latestDiscard={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[2].playerId).latestDiscard : null}
-          melds={state() ? getAiPlayerData(state()!, catalog(), AI_POSITIONS[2].playerId).melds : []}
-        />
-
-        {/* Player (South, player_id=0) */}
+        {/* Player (player_id=0) */}
         <PlayerRow
           hand={playerHand()}
           drawnTile={playerDrawnTile()}
           melds={playerMelds()}
           availableActions={store.availableActions()}
+          seatWind={seatWinds()[0]}
         />
 
         {/* Popups (mutually exclusive) */}

@@ -23,6 +23,29 @@ pub const Session = struct {
         try stream_writer.interface.flush();
     }
 
+    /// 等待 TUI 傳來 player_ready 訊息。
+    /// 非 player_ready 訊息會被略過，繼續等待。
+    pub fn waitForPlayerReady(self: *Session) !void {
+        var read_buffer: [READ_BUFFER_SIZE]u8 = undefined;
+        var reader = self.stream.reader(self.io, &read_buffer);
+
+        while (true) {
+            const line = reader.interface.takeDelimiterExclusive('\n') catch |err| switch (err) {
+                error.EndOfStream => return error.ConnectionClosed,
+                error.ReadFailed => return reader.err.?,
+                else => return err,
+            };
+
+            var message = protocol.parseMessage(self.allocator, line) catch continue;
+            defer message.deinit(self.allocator);
+
+            switch (message) {
+                .player_ready => return,
+                else => continue,
+            }
+        }
+    }
+
     /// 等待 TUI 傳來 player_action 訊息。
     /// 非 player_action 訊息會被略過，繼續等待。
     /// timeout_ms 為 null 表示無限等待；非 null 時超過時限自動回傳 pass。

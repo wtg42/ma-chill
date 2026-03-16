@@ -25,6 +25,7 @@ export interface ZigGameState {
   round_wind: string;
   round_number: number;
   dealer_player_id: number;
+  seat_winds: string[];
   current_player_id: number;
   drawn_tile_id: number | null;
   scores: number[];
@@ -49,6 +50,23 @@ export interface ZigTurnChangedMessage {
   available_actions: string[];
 }
 
+export interface ZigScoringLine {
+  pattern: string;
+  fan: number;
+}
+
+export interface ZigScoringDetail {
+  total_fan: number;
+  lines: ZigScoringLine[];
+}
+
+export interface ZigGameOverMessage {
+  type: "game_over";
+  winner_id: number | null;
+  scores: number[];
+  scoring_detail: ZigScoringDetail | null;
+}
+
 // ---- Hand entry ----
 
 export interface HandEntry {
@@ -63,6 +81,7 @@ export function useGameState() {
   const [availableActions, setAvailableActions] = createSignal<string[]>([]);
   const [currentPlayerId, setCurrentPlayerId] = createSignal<number>(0);
   const [tileCatalog, setTileCatalog] = createSignal<Map<number, CanonicalTile>>(new Map());
+  const [gameOverMsg, setGameOverMsg] = createSignal<ZigGameOverMessage | null>(null);
 
   function applyInit(msg: ZigInitMessage): void {
     const catalog = buildTileCatalogMap(msg.tile_catalog);
@@ -78,6 +97,10 @@ export function useGameState() {
   function applyTurnChanged(msg: ZigTurnChangedMessage): void {
     setAvailableActions(msg.available_actions);
     setCurrentPlayerId(msg.player_id);
+  }
+
+  function applyGameOver(msg: ZigGameOverMessage): void {
+    setGameOverMsg(msg);
   }
 
   const handWithIds = createMemo<HandEntry[]>(() => {
@@ -98,15 +121,23 @@ export function useGameState() {
     return entries;
   });
 
+  const seatWinds = createMemo<string[]>(() => {
+    const state = gameState();
+    return state?.seat_winds ?? ["east", "east", "east", "east"];
+  });
+
   return {
     gameState,
     availableActions,
     currentPlayerId,
     tileCatalog,
+    gameOverMsg,
     applyInit,
     applyStateUpdate,
     applyTurnChanged,
+    applyGameOver,
     handWithIds,
+    seatWinds,
   };
 }
 

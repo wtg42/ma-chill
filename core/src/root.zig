@@ -7,6 +7,7 @@ pub const game = struct {
     pub const deck = @import("game/deck.zig");
     pub const state = @import("game/state.zig");
     pub const round = @import("game/round.zig");
+    pub const seat_wind = @import("game/seat_wind.zig");
 };
 
 pub const ipc = struct {

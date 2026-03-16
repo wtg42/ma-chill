@@ -1,9 +1,9 @@
 import type { GameStateStore } from "./game-state";
-import type { ZigInitMessage, ZigStateUpdateMessage, ZigTurnChangedMessage } from "./game-state";
+import type { ZigInitMessage, ZigStateUpdateMessage, ZigTurnChangedMessage, ZigGameOverMessage } from "./game-state";
 
 const DEFAULT_SOCKET = "/tmp/ma-chill.sock";
 
-type ZigMessage = ZigInitMessage | ZigStateUpdateMessage | ZigTurnChangedMessage | { type: string };
+type ZigMessage = ZigInitMessage | ZigStateUpdateMessage | ZigTurnChangedMessage | ZigGameOverMessage | { type: string };
 
 let socket: { write: (data: string) => void } | null = null;
 
@@ -14,6 +14,11 @@ export function sendAction(action: string, tileId?: number): void {
     msg.tile_id = tileId;
   }
   socket.write(JSON.stringify(msg) + "\n");
+}
+
+export function sendPlayerReady(): void {
+  if (!socket) return;
+  socket.write(JSON.stringify({ type: "player_ready" }) + "\n");
 }
 
 export async function connect(store: GameStateStore): Promise<void> {
@@ -39,6 +44,9 @@ export async function connect(store: GameStateStore): Promise<void> {
         break;
       case "turn_changed":
         store.applyTurnChanged(msg as ZigTurnChangedMessage);
+        break;
+      case "game_over":
+        store.applyGameOver(msg as ZigGameOverMessage);
         break;
       default:
         // Unknown message type — ignore

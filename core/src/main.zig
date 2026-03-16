@@ -34,13 +34,17 @@ pub fn main(init: std.process.Init) !void {
     var prng = std.Random.DefaultPrng.init(@intCast(ts.toMilliseconds()));
     game.deck.shuffle(prng.random(), &catalog);
 
-    var game_state = try game.round.initGameState(arena, &catalog);
+    const dealer_player_id: u8 = prng.random().intRangeAtMost(u8, 0, 3);
+    var game_state = try game.round.initGameState(arena, &catalog, dealer_player_id);
     defer game_state.deinit();
 
     // 5. 推送 init 訊息
     var init_msg = try game.round.buildInitMessage(arena, &catalog, &game_state, PASS_TIMEOUT_MS / 1000);
     defer init_msg.deinit(arena);
     try session.sendMessage(init_msg);
+
+    // 5.5 等待 TUI 玩家按鍵確認（Lobby 畫面）
+    try session.waitForPlayerReady();
 
     // 6. 執行遊戲迴圈
     var driver = GameDriver{ .session = &session, .pass_timeout_ms = PASS_TIMEOUT_MS };

@@ -5,6 +5,7 @@ const tile = @import("tile.zig");
 const protocol = @import("../ipc/protocol.zig");
 const actions = @import("../rules/actions.zig");
 const scoring = @import("../rules/scoring.zig");
+const seat_wind = @import("seat_wind.zig");
 
 pub const ClaimAction = enum {
     pass,
@@ -24,12 +25,16 @@ pub const RoundResult = struct {
     scores: [4]i32,
 };
 
-pub fn initGameState(allocator: std.mem.Allocator, shuffled_tiles: []const tile.Tile) !state.GameState {
+pub fn initGameState(allocator: std.mem.Allocator, shuffled_tiles: []const tile.Tile, dealer_player_id: u8) !state.GameState {
     var deal = try deck.dealInitialHands(allocator, shuffled_tiles);
     defer deal.deinit();
 
     var game_state = state.GameState.init(allocator);
     errdefer game_state.deinit();
+
+    game_state.dealer_player_id = dealer_player_id;
+    game_state.current_player_id = dealer_player_id;
+    game_state.seat_winds = seat_wind.assignSeatWinds(dealer_player_id);
 
     for (0..state.player_count) |player_id| {
         try game_state.players[player_id].hand.appendSlice(allocator, deal.hands[player_id].items);
@@ -104,6 +109,7 @@ pub fn playRound(allocator: std.mem.Allocator, game_state: *state.GameState, dri
                 const game_over: protocol.Message = .{ .game_over = .{
                     .winner_id = null,
                     .scores = game_state.scores,
+                    .scoring_detail = null,
                 } };
                 try driver.sink(game_over);
                 return .{ .winner_id = null, .scores = game_state.scores };
@@ -122,8 +128,14 @@ pub fn playRound(allocator: std.mem.Allocator, game_state: *state.GameState, dri
 
         switch (turn_action.action) {
             .win => {
-                applyWin(game_state, game_state.current_player_id, true);
-                try driver.sink(.{ .game_over = .{ .winner_id = game_state.current_player_id, .scores = game_state.scores } });
+                const win_ctx = buildWinContext(game_state, game_state.current_player_id, null, true);
+                const score_result = scoring.calculateFan(&win_ctx);
+                applyWinScores(game_state, game_state.current_player_id, score_result.total_fan);
+                try driver.sink(.{ .game_over = .{
+                    .winner_id = game_state.current_player_id,
+                    .scores = game_state.scores,
+                    .scoring_detail = score_result,
+                } });
                 return .{ .winner_id = game_state.current_player_id, .scores = game_state.scores };
             },
             .kong => {
@@ -141,6 +153,7 @@ pub fn playRound(allocator: std.mem.Allocator, game_state: *state.GameState, dri
                     return .{ .winner_id = winner_id, .scores = game_state.scores };
                 }
 
+                game_state.turn_count += 1;
                 game_state.current_player_id = nextPlayer(game_state.current_player_id);
                 pending_draw = true;
             },
@@ -196,13 +209,26 @@ fn resolveClaims(allocator: std.mem.Allocator, game_state: *state.GameState, dis
     const selected = prioritizeClaimChoices(choices[0..choice_count]) orelse return null;
     switch (selected.action) {
         .win => {
-            applyWin(game_state, selected.player_id, false);
-            try driver.sink(.{ .game_over = .{ .winner_id = selected.player_id, .scores = game_state.scores } });
+            const win_ctx = buildWinContext(game_state, selected.player_id, discarded_tile_id, false);
+            const score_result = scoring.calculateFan(&win_ctx);
+            applyWinScores(game_state, selected.player_id, score_result.total_fan);
+            try driver.sink(.{ .game_over = .{
+                .winner_id = selected.player_id,
+                .scores = game_state.scores,
+                .scoring_detail = score_result,
+            } });
             return selected.player_id;
         },
-        .chi => try applyChiClaim(game_state, selected.player_id, discarded_tile_id),
-        .pon => try applyPonClaim(game_state, selected.player_id, discarded_tile_id),
+        .chi => {
+            game_state.any_claims_made = true;
+            try applyChiClaim(game_state, selected.player_id, discarded_tile_id);
+        },
+        .pon => {
+            game_state.any_claims_made = true;
+            try applyPonClaim(game_state, selected.player_id, discarded_tile_id);
+        },
         .kong => {
+            game_state.any_claims_made = true;
             try applyOpenKongClaim(game_state, selected.player_id, discarded_tile_id);
             _ = try drawTileForPlayer(game_state, selected.player_id);
         },
@@ -394,15 +420,52 @@ fn containsAction(actions_list: []const protocol.ActionType, action: protocol.Ac
     return false;
 }
 
-fn applyWin(game_state: *state.GameState, winner_id: u8, self_draw: bool) void {
-    const fan = scoring.calculateBasicFan(.{ .self_draw = self_draw }).total_fan + 1;
+fn applyWinScores(game_state: *state.GameState, winner_id: u8, total_fan: u8) void {
+    const fan: i32 = @as(i32, total_fan) + 1;
     for (&game_state.scores, 0..) |*score, player_id| {
         if (player_id == winner_id) {
-            score.* += @as(i32, fan * 3);
+            score.* += fan * 3;
         } else {
-            score.* -= @as(i32, fan);
+            score.* -= fan;
         }
     }
+}
+
+fn buildWinContext(game_state: *const state.GameState, winner_id: u8, discarded_tile_id: ?u8, self_draw: bool) scoring.WinContext {
+    const winner = &game_state.players[winner_id];
+    const catalog = tile.generateCatalog();
+
+    // Determine is_concealed: no pon/chi/open_kong melds (closed_kong is OK)
+    var is_concealed = true;
+    for (winner.melds.items) |meld| {
+        if (meld.kind == .chi or meld.kind == .pon or meld.kind == .open_kong) {
+            is_concealed = false;
+            break;
+        }
+    }
+
+    // Build full hand: hand tiles + winning_tile (for claim wins, winning_tile not yet in hand)
+    // For self_draw: winning_tile already in hand
+    const winning_tile_val = if (discarded_tile_id) |id| catalog[id] else game_state.players[winner_id].hand.items[game_state.players[winner_id].hand.items.len - 1];
+
+    // Seat distance from dealer determines is_first_draw
+    const seat_offset: u32 = (winner_id + 4 - game_state.dealer_player_id) % 4;
+    const is_first_draw = (game_state.turn_count == seat_offset);
+    const is_first_round_no_claims = (game_state.turn_count < 4) and !game_state.any_claims_made;
+
+    return .{
+        .hand = winner.hand.items,
+        .melds = winner.melds.items,
+        .bonus_tiles = winner.bonus_tiles.items,
+        .winning_tile = winning_tile_val,
+        .seat_wind = game_state.seat_winds[winner_id],
+        .round_wind = game_state.round_wind,
+        .self_draw = self_draw,
+        .is_concealed = is_concealed,
+        .is_dealer = (winner_id == game_state.dealer_player_id),
+        .is_first_draw = is_first_draw,
+        .is_first_round_no_claims = is_first_round_no_claims,
+    };
 }
 
 fn sameKind(a: tile.Tile, b: tile.Tile) bool {

@@ -5,11 +5,19 @@ import { toTextRenderKey } from "../tiles/display";
 import { MeldRow, type MeldData } from "./MeldRow";
 import { LatestTileBox } from "./LatestTileBox";
 
+const WIND_ZH: Record<string, string> = {
+  east: "東",
+  south: "南",
+  west: "西",
+  north: "北",
+};
+
 interface PlayerRowProps {
   hand: CanonicalTile[];
   drawnTile?: CanonicalTile | null;
   melds?: MeldData[];
   availableActions?: string[];
+  seatWind?: string;
 }
 
 export function PlayerRow(props: PlayerRowProps): JSX.Element {
@@ -78,7 +86,7 @@ export function PlayerRow(props: PlayerRowProps): JSX.Element {
 
     return (
       <box flexDirection="row" paddingLeft={1} gap={2} borderTop="single" borderStyle="none">
-        <text>東風三局  剩44張</text>
+        <text>{WIND_ZH[props.seatWind ?? "east"] ?? "東"}風</text>
         <text dimmed={true}>|</text>
         <box flexDirection="row" gap={1}>
           <For each={actions}>

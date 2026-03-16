@@ -80,10 +80,13 @@ pub const GameState = struct {
     round_wind: RoundWind,
     round_number: u8,
     dealer_player_id: u8,
+    seat_winds: [player_count]RoundWind,
     current_player_id: u8,
     drawn_tile_id: ?u8,
     scores: [player_count]i32,
     events: std.ArrayListUnmanaged(GameEvent),
+    turn_count: u32,
+    any_claims_made: bool,
 
     pub fn init(allocator: std.mem.Allocator) GameState {
         var players: [player_count]PlayerState = undefined;
@@ -98,10 +101,13 @@ pub const GameState = struct {
             .round_wind = .east,
             .round_number = 1,
             .dealer_player_id = 0,
+            .seat_winds = .{ .east, .east, .east, .east },
             .current_player_id = 0,
             .drawn_tile_id = null,
             .scores = .{ 0, 0, 0, 0 },
             .events = .empty,
+            .turn_count = 0,
+            .any_claims_made = false,
         };
     }
 
@@ -164,6 +170,14 @@ pub const GameState = struct {
         } else {
             try writer.writeAll("null");
         }
+        try writer.writeAll(",\"seat_winds\":[");
+        for (self.seat_winds, 0..) |wind, index| {
+            if (index > 0) {
+                try writer.writeByte(',');
+            }
+            try writeStringValue(writer, @tagName(wind));
+        }
+        try writer.writeByte(']');
         try writer.writeAll(",\"scores\":[");
         for (self.scores, 0..) |score, index| {
             if (index > 0) {
