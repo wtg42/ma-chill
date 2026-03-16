@@ -5,6 +5,8 @@ node_modules/
 # Zig 編譯產物
 **/.zig-cache/
 zig-cache/
+zig-out/
+**/zig-out/
 zig-lib/
 build/
 *.o
