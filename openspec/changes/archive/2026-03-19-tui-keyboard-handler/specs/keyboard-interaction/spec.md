@@ -1,8 +1,4 @@
-## Purpose
-
-定義麻將遊戲中玩家與 UI 的互動方式，強調快捷鍵驅動的設計原則，以及各類動作的對應快捷鍵配置。
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: 鍵盤驅動設計原則
 
@@ -52,22 +48,6 @@
 - **WHEN** 倒數進行中，收到新的 `turn_changed` 訊息
 - **THEN** 清除舊 timer，依新的 `available_actions` 決定是否重新啟動
 
-### Requirement: StatusBar 可用動作來源
-
-`StatusBar` SHALL 依 Zig `turn_changed` 訊息中的 `available_actions` 陣列決定哪些熱鍵可用；不在陣列中的動作以灰化樣式顯示，按下時不執行任何動作。TUI 收到 `turn_changed` 後更新本地狀態並傳遞給 StatusBar。
-
-#### Scenario: turn_changed 包含部分動作
-- **WHEN** Zig 推送 `{ "available_actions": ["chi", "win"] }`
-- **THEN** StatusBar 的 c（吃）與 h（胡）正常顯示，p（碰）、k（槓）灰化
-
-### Requirement: 狀態列快捷鍵提示
-
-狀態列 SHALL 常態顯示當前可用的快捷鍵，讓玩家無需記憶全部按鍵。不可用的動作以灰化樣式顯示；不再顯示 pass/放棄 的按鍵提示。
-
-#### Scenario: 輪到玩家打牌
-- **WHEN** 玩家需要打牌
-- **THEN** 狀態列顯示打牌說明與可用動作鍵
-
 ### Requirement: 摸牌固定按鍵（space）
 
 玩家摸牌後若需打出摸牌，SHALL 使用 `space` 鍵，該鍵固定對應摸牌，與手牌位置按鍵（a/s/d/...）視覺上以 gap 分隔。
@@ -91,6 +71,8 @@
 #### Scenario: 任意時機按反斜線
 - **WHEN** 玩家按下 `\`
 - **THEN** GameInfoPopup 切換開關狀態，DiscardHistoryPopup 關閉
+
+## ADDED Requirements
 
 ### Requirement: DiceLobby 使用 OpenTUI 鍵盤 API
 

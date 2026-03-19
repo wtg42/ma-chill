@@ -5,6 +5,7 @@ import { AiPlayerRow } from "./AiPlayerRow";
 import { PlayerRow } from "./PlayerRow";
 import { DiscardHistoryPopup } from "./DiscardHistoryPopup";
 import { GameInfoPopup } from "./GameInfoPopup";
+import { useGameKeys } from "./useGameKeys";
 import type { GameStateStore, ZigGameState, ZigMeld } from "../game-state";
 import type { CanonicalTile } from "../tiles/types";
 import type { MeldData } from "./MeldRow";
@@ -87,29 +88,15 @@ export function GameTable(props: GameTableProps): JSX.Element {
   const [showDiscardHistory, setShowDiscardHistory] = createSignal(false);
   const [showGameInfo, setShowGameInfo] = createSignal(false);
 
+  useGameKeys(store, {
+    showDiscardHistory,
+    setShowDiscardHistory,
+    showGameInfo,
+    setShowGameInfo,
+  });
+
   const isSizeValid = () =>
     dimensions().width >= MIN_WIDTH && dimensions().height >= MIN_HEIGHT;
-
-  const isPlayerTurn = createMemo(() => store.currentPlayerId() === 0);
-
-  const handleKeyDown = (key: string) => {
-    if (key === "tab") {
-      if (!isPlayerTurn()) return;
-      if (showDiscardHistory()) {
-        setShowDiscardHistory(false);
-      } else {
-        setShowDiscardHistory(true);
-        setShowGameInfo(false);
-      }
-    } else if (key === "\\") {
-      if (showGameInfo()) {
-        setShowGameInfo(false);
-      } else {
-        setShowGameInfo(true);
-        setShowDiscardHistory(false);
-      }
-    }
-  };
 
   // Derived data from store
   const catalog = () => store.tileCatalog();
@@ -153,7 +140,7 @@ export function GameTable(props: GameTableProps): JSX.Element {
       when={isSizeValid()}
       fallback={<TooSmallWarning currentDimensions={dimensions()} />}
     >
-      <box flexDirection="column" width="100%" height="100%" gap={0} onKeyDown={handleKeyDown}>
+      <box flexDirection="column" width="100%" height="100%" gap={0}>
         {/* AI players (player_id 1, 2, 3) */}
         {AI_PLAYER_IDS.map((playerId) => {
           const wind = () => seatWinds()[playerId] ?? "east";

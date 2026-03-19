@@ -82,12 +82,14 @@ export function useGameState() {
   const [currentPlayerId, setCurrentPlayerId] = createSignal<number>(0);
   const [tileCatalog, setTileCatalog] = createSignal<Map<number, CanonicalTile>>(new Map());
   const [gameOverMsg, setGameOverMsg] = createSignal<ZigGameOverMessage | null>(null);
+  const [passTimeoutSeconds, setPassTimeoutSeconds] = createSignal(5);
 
   function applyInit(msg: ZigInitMessage): void {
     const catalog = buildTileCatalogMap(msg.tile_catalog);
     setTileCatalog(catalog);
     setGameState(msg.state);
     setAvailableActions([]);
+    setPassTimeoutSeconds(msg.pass_timeout_seconds);
   }
 
   function applyStateUpdate(msg: ZigStateUpdateMessage): void {
@@ -138,6 +140,7 @@ export function useGameState() {
     applyGameOver,
     handWithIds,
     seatWinds,
+    passTimeoutSeconds,
   };
 }
 

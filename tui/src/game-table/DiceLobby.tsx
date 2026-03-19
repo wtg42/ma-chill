@@ -1,4 +1,5 @@
-import { JSX, For, onCleanup, onMount } from "solid-js";
+import { JSX, For } from "solid-js";
+import { useKeyboard } from "@opentui/solid";
 
 const WIND_ZH: Record<string, string> = {
   east: "東",
@@ -32,16 +33,10 @@ export function DiceLobby(props: DiceLobbyProps): JSX.Element {
     { label: "下（你）", playerId: 0 },
   ];
 
-  onMount(() => {
-    const handler = (_key: string) => {
+  useKeyboard((key) => {
+    if (key.eventType === "press") {
       props.onStart();
-    };
-    process.stdin.setRawMode?.(true);
-    process.stdin.resume();
-    process.stdin.once("data", () => handler("any"));
-    onCleanup(() => {
-      process.stdin.pause();
-    });
+    }
   });
 
   return (
