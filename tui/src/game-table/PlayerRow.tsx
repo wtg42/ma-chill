@@ -81,7 +81,7 @@ export function PlayerRow(props: PlayerRowProps): JSX.Element {
       { key: "p", label: "碰", action: "pon" },
       { key: "k", label: "槓", action: "kong" },
       { key: "h", label: "胡", action: "win" },
-      { key: "r", label: "棄牌", action: "discard" },
+      { key: "space", label: "切摸牌", action: "discard" },
     ];
 
     return (

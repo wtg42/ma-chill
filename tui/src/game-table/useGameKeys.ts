@@ -14,7 +14,7 @@ const CLAIM_KEYS: Record<string, string> = {
   c: "chi",
   p: "pon",
   k: "kong",
-  h: "hu",
+  h: "win",
 };
 
 interface PopupControls {
@@ -29,6 +29,12 @@ export function useGameKeys(
   popups: PopupControls,
 ): void {
   let passTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function submitAction(action: string, tileId?: number): void {
+    clearPassTimer();
+    store.clearTurnPrompt();
+    sendAction(action, tileId);
+  }
 
   function clearPassTimer(): void {
     if (passTimer !== null) {
@@ -65,11 +71,14 @@ export function useGameKeys(
       return;
     }
 
+    if (store.currentPlayerId() !== 0 || actions.length === 0) {
+      return;
+    }
+
     // Claim actions (chi/pon/kong/hu)
     const claimAction = CLAIM_KEYS[name];
     if (claimAction && actions.includes(claimAction)) {
-      clearPassTimer();
-      sendAction(claimAction);
+      submitAction(claimAction);
       return;
     }
 
@@ -79,7 +88,7 @@ export function useGameKeys(
       if (name === "space") {
         const state = store.gameState();
         if (state && state.drawn_tile_id != null) {
-          sendAction("discard", state.drawn_tile_id);
+          submitAction("discard", state.drawn_tile_id);
         }
         return;
       }
@@ -90,7 +99,7 @@ export function useGameKeys(
         const hand = store.handWithIds();
         const entry = hand[tileIndex];
         if (entry) {
-          sendAction("discard", entry.id);
+          submitAction("discard", entry.id);
         }
       }
     }

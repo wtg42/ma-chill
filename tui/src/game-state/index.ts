@@ -1,6 +1,8 @@
 import { createSignal, createMemo } from "solid-js";
 import type { CanonicalTile } from "../tiles/types";
 import { buildTileCatalogMap, type ZigTileEntry } from "../tiles/catalog-map";
+import { formatTileLabel } from "../tiles";
+import { getAlwaysAvailableCommandHints, getAvailableCommandHints } from "../commands/registry";
 
 // ---- Types from Zig protocol ----
 
@@ -74,6 +76,86 @@ export interface HandEntry {
   tile: CanonicalTile;
 }
 
+export interface EventLogEntry {
+  id: number;
+  kind: "system" | "command" | "game" | "error";
+  message: string;
+}
+
+export interface CommandFeedback {
+  kind: "info" | "success" | "error";
+  message: string;
+}
+
+const PLAYER_NAMES = ["你", "玩家 2", "玩家 3", "玩家 4"];
+
+function playerLabel(playerId: number): string {
+  return PLAYER_NAMES[playerId] ?? `玩家 ${playerId + 1}`;
+}
+
+function describeMeld(type: ZigMeld["type"]): string {
+  switch (type) {
+    case "chi":
+      return "吃牌";
+    case "pon":
+      return "碰牌";
+    case "open_kong":
+    case "closed_kong":
+      return "槓牌";
+  }
+}
+
+function diffStateMessages(
+  previous: ZigGameState | null,
+  next: ZigGameState,
+  tileCatalog: Map<number, CanonicalTile>,
+): string[] {
+  if (!previous) {
+    return [];
+  }
+
+  const messages: string[] = [];
+
+  for (let playerId = 0; playerId < next.players.length; playerId += 1) {
+    const prevPlayer = previous.players[playerId];
+    const nextPlayer = next.players[playerId];
+    if (!prevPlayer || !nextPlayer) continue;
+
+    if (nextPlayer.discards.length > prevPlayer.discards.length) {
+      const tileId = nextPlayer.discards[nextPlayer.discards.length - 1];
+      const tile = tileCatalog.get(tileId);
+      messages.push(`${playerLabel(playerId)}打出 ${tile ? formatTileLabel(tile) : `tile ${tileId}`}`);
+    }
+
+    if (nextPlayer.melds.length > prevPlayer.melds.length) {
+      const meld = nextPlayer.melds[nextPlayer.melds.length - 1];
+      if (meld) {
+        messages.push(`${playerLabel(playerId)}${describeMeld(meld.type)}`);
+      }
+    }
+  }
+
+  if (next.drawn_tile_id !== null && next.drawn_tile_id !== previous.drawn_tile_id) {
+    const tile = tileCatalog.get(next.drawn_tile_id);
+    if (next.current_player_id === 0 && tile) {
+      messages.push(`你摸到 ${formatTileLabel(tile)}`);
+    } else {
+      messages.push(`${playerLabel(next.current_player_id)}摸牌`);
+    }
+  }
+
+  for (const event of next.events) {
+    if (typeof event !== "object" || event === null) continue;
+    const typedEvent = event as { type?: string; player_id?: number; tile_id?: number };
+    if (typedEvent.type === "bonus_tile" && typeof typedEvent.player_id === "number" && typeof typedEvent.tile_id === "number") {
+      const tile = tileCatalog.get(typedEvent.tile_id);
+      messages.push(`${playerLabel(typedEvent.player_id)}補花 ${tile ? formatTileLabel(tile) : `tile ${typedEvent.tile_id}`}`);
+    }
+  }
+
+  return messages;
+}
+
 // ---- useGameState hook ----
 
 export function useGameState() {
@@ -83,26 +165,78 @@ export function useGameState() {
   const [tileCatalog, setTileCatalog] = createSignal<Map<number, CanonicalTile>>(new Map());
   const [gameOverMsg, setGameOverMsg] = createSignal<ZigGameOverMessage | null>(null);
   const [passTimeoutSeconds, setPassTimeoutSeconds] = createSignal(5);
+  const [commandInput, setCommandInput] = createSignal("");
+  const [commandFeedback, setCommandFeedbackState] = createSignal<CommandFeedback | null>(null);
+  const [eventLog, setEventLog] = createSignal<EventLogEntry[]>([]);
+  const [availableCommandHints, setAvailableCommandHints] = createSignal<string[]>(getAlwaysAvailableCommandHints());
+  let nextEventId = 1;
+
+  function appendEvent(kind: EventLogEntry["kind"], message: string): void {
+    setEventLog((entries) => [
+      ...entries,
+      {
+        id: nextEventId,
+        kind,
+        message,
+      },
+    ]);
+    nextEventId += 1;
+  }
+
+  function setCommandFeedback(kind: CommandFeedback["kind"], message: string): void {
+    setCommandFeedbackState({ kind, message });
+  }
 
   function applyInit(msg: ZigInitMessage): void {
     const catalog = buildTileCatalogMap(msg.tile_catalog);
     setTileCatalog(catalog);
     setGameState(msg.state);
     setAvailableActions([]);
+    setCurrentPlayerId(msg.state.current_player_id);
     setPassTimeoutSeconds(msg.pass_timeout_seconds);
+    setAvailableCommandHints(getAlwaysAvailableCommandHints());
+    appendEvent("system", "已連線至 Zig core。輸入 /help 查看可用指令。");
   }
 
   function applyStateUpdate(msg: ZigStateUpdateMessage): void {
+    const previousState = gameState();
+    const catalog = tileCatalog();
     setGameState(msg.state);
+    setAvailableActions([]);
+    setCurrentPlayerId(msg.state.current_player_id);
+    setAvailableCommandHints(getAlwaysAvailableCommandHints());
+
+    const messages = diffStateMessages(previousState, msg.state, catalog);
+    for (const message of messages) {
+      appendEvent("game", message);
+    }
   }
 
   function applyTurnChanged(msg: ZigTurnChangedMessage): void {
     setAvailableActions(msg.available_actions);
     setCurrentPlayerId(msg.player_id);
+    const hints = getAvailableCommandHints(msg.available_actions);
+    setAvailableCommandHints(hints);
+    appendEvent(
+      "system",
+      `${playerLabel(msg.player_id)}可用：${hints.join(" ")}`,
+    );
   }
 
   function applyGameOver(msg: ZigGameOverMessage): void {
     setGameOverMsg(msg);
+    setAvailableActions([]);
+    setAvailableCommandHints(getAlwaysAvailableCommandHints());
+    if (msg.winner_id === null) {
+      appendEvent("game", "本局流局。" );
+    } else {
+      appendEvent("game", `${playerLabel(msg.winner_id)}胡牌，對局結束。`);
+    }
+  }
+
+  function clearTurnPrompt(): void {
+    setAvailableActions([]);
+    setAvailableCommandHints(getAlwaysAvailableCommandHints());
   }
 
   const handWithIds = createMemo<HandEntry[]>(() => {
@@ -134,10 +268,18 @@ export function useGameState() {
     currentPlayerId,
     tileCatalog,
     gameOverMsg,
+    commandInput,
+    commandFeedback,
+    eventLog,
+    availableCommandHints,
     applyInit,
     applyStateUpdate,
     applyTurnChanged,
     applyGameOver,
+    clearTurnPrompt,
+    appendEvent,
+    setCommandInput,
+    setCommandFeedback,
     handWithIds,
     seatWinds,
     passTimeoutSeconds,

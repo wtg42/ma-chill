@@ -14,6 +14,7 @@ export {
   WINDS,
 } from "./constants";
 export { toDisplayAdapter, toImageAssetKey, toTextRenderKey } from "./display";
+export { formatTileLabel, formatTileShort, tileMatchesToken } from "./labels";
 export { renderTileTextTemplate, resolveTileTextTemplateByKey, toTileTextRenderBinding } from "./text-render";
 export { toZigInteropCatalog, toZigInteropTile } from "./interop";
 export type {

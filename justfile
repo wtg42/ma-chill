@@ -28,7 +28,7 @@ build-core:
 
 # 編譯 TUI（production bundle）
 build-tui:
-    cd tui && bun build src/index.tsx --outdir dist
+    cd tui && bun build src/index.tsx --outdir dist --target bun
 
 # 編譯全部
 build: build-core build-tui
