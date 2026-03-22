@@ -6,6 +6,9 @@ pub const game = struct {
     pub const tile = @import("game/tile.zig");
     pub const deck = @import("game/deck.zig");
     pub const state = @import("game/state.zig");
+    pub const action_availability = @import("game/action_availability.zig");
+    pub const transitions = @import("game/transitions.zig");
+    pub const claims = @import("game/claims.zig");
     pub const round = @import("game/round.zig");
     pub const seat_wind = @import("game/seat_wind.zig");
 };
