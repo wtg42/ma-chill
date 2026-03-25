@@ -2,9 +2,14 @@ import { createEffect, onCleanup } from "solid-js";
 import { useKeyboard } from "@opentui/solid";
 import type { GameStateStore } from "../game-state";
 import { executeCommand } from "../commands";
+import {
+  handleEventLogNavigationKey,
+  type EventLogNavigationControls,
+} from "./event-log-controls";
 
 const ACCELERATORS: Record<string, string> = {
   h: "/help",
+  o: "/hand",
   s: "/status",
   j: "/chi",
   p: "/pon",
@@ -13,7 +18,38 @@ const ACCELERATORS: Record<string, string> = {
   f: "/pass",
 };
 
-export function useCommandKeys(store: GameStateStore): void {
+interface CommandKeyEvent {
+  eventType: string;
+  ctrl: boolean;
+  name: string;
+  preventDefault: () => void;
+}
+
+type CommandExecutor = typeof executeCommand;
+
+export function handleCommandKey(
+  key: CommandKeyEvent,
+  store: GameStateStore,
+  execute: CommandExecutor = executeCommand,
+): boolean {
+  if (key.eventType !== "press" || !key.ctrl) {
+    return false;
+  }
+
+  const command = ACCELERATORS[key.name];
+  if (!command) {
+    return false;
+  }
+
+  key.preventDefault();
+  execute(command, store);
+  return true;
+}
+
+export function useCommandKeys(
+  store: GameStateStore,
+  eventLogControls?: EventLogNavigationControls,
+): void {
   let passTimer: ReturnType<typeof setTimeout> | null = null;
 
   function clearPassTimer(): void {
@@ -24,17 +60,13 @@ export function useCommandKeys(store: GameStateStore): void {
   }
 
   useKeyboard((key) => {
-    if (key.eventType !== "press" || !key.ctrl) {
+    if (handleCommandKey(key, store)) {
       return;
     }
 
-    const command = ACCELERATORS[key.name];
-    if (!command) {
-      return;
+    if (eventLogControls) {
+      handleEventLogNavigationKey(key, eventLogControls);
     }
-
-    key.preventDefault();
-    executeCommand(command, store);
   });
 
   createEffect(() => {

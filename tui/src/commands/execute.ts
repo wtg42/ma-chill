@@ -1,5 +1,6 @@
 import { sendAction } from "../connection";
 import type { GameStateStore } from "../game-state";
+import { formatHandSummaryLines } from "../game-state/hand-summary";
 import { formatTileLabel, formatTileShort, tileMatchesToken } from "../tiles";
 import { describeAllCommands, findCommandDefinition } from "./registry";
 import { parseSlashCommand } from "./parser";
@@ -13,6 +14,10 @@ interface CommandResult {
   message: string;
 }
 
+interface CommandDeps {
+  sendAction: (action: string, tileId?: number) => void;
+}
+
 const ROUND_WIND_ZH: Record<string, string> = {
   east: "東",
   south: "南",
@@ -21,8 +26,14 @@ const ROUND_WIND_ZH: Record<string, string> = {
 };
 
 const PLAYER_NAMES = ["你", "玩家 2", "玩家 3", "玩家 4"];
+const DEFAULT_DEPS: CommandDeps = { sendAction };
 
-export function executeCommand(raw: string, store: GameStateStore, options: ExecuteOptions = {}): CommandResult {
+export function executeCommand(
+  raw: string,
+  store: GameStateStore,
+  options: ExecuteOptions = {},
+  deps: CommandDeps = DEFAULT_DEPS,
+): CommandResult {
   const echo = options.echo ?? true;
   const trimmed = raw.trim();
 
@@ -49,7 +60,7 @@ export function executeCommand(raw: string, store: GameStateStore, options: Exec
     return executeLocalCommand(definition.name, store);
   }
 
-  return executeActionCommand(definition.action ?? definition.name, parsed.command.args, store);
+  return executeActionCommand(definition.action ?? definition.name, parsed.command.args, store, deps);
 }
 
 function executeLocalCommand(name: string, store: GameStateStore): CommandResult {
@@ -68,6 +79,22 @@ function executeLocalCommand(name: string, store: GameStateStore): CommandResult
     return { ok: false, message };
   }
 
+  if (name === "hand") {
+    const lines = formatHandSummaryLines(
+      store.handWithIds(),
+      state.drawn_tile_id,
+      state.drawn_tile_id != null ? store.tileCatalog().get(state.drawn_tile_id) ?? null : null,
+    );
+
+    for (const line of lines) {
+      store.appendEvent("system", line);
+    }
+
+    const message = "已顯示目前手牌。";
+    store.setCommandFeedback("info", message);
+    return { ok: true, message };
+  }
+
   const current = PLAYER_NAMES[store.currentPlayerId()] ?? `玩家 ${store.currentPlayerId() + 1}`;
   const scores = state.scores.map((score, index) => `${PLAYER_NAMES[index] ?? `玩家 ${index + 1}`} ${score}`).join(" / ");
   const hints = store.availableCommandHints().join(" ");
@@ -77,7 +104,7 @@ function executeLocalCommand(name: string, store: GameStateStore): CommandResult
   return { ok: true, message };
 }
 
-function executeActionCommand(action: string, args: string[], store: GameStateStore): CommandResult {
+function executeActionCommand(action: string, args: string[], store: GameStateStore, deps: CommandDeps): CommandResult {
   const availableActions = store.availableActions();
   if (!availableActions.includes(action)) {
     const message = `目前不可執行 /${action}。`;
@@ -94,7 +121,7 @@ function executeActionCommand(action: string, args: string[], store: GameStateSt
       return resolved;
     }
     store.clearTurnPrompt();
-    sendAction("discard", resolved.tileId);
+    deps.sendAction("discard", resolved.tileId);
     const message = `已送出 /discard ${resolved.display}`;
     store.setCommandFeedback("success", message);
     store.appendEvent("system", message);
@@ -102,7 +129,7 @@ function executeActionCommand(action: string, args: string[], store: GameStateSt
   }
 
   store.clearTurnPrompt();
-  sendAction(action);
+  deps.sendAction(action);
   const message = `已送出 /${action}`;
   store.setCommandFeedback("success", message);
   store.appendEvent("system", message);

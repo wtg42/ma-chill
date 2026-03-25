@@ -22,6 +22,12 @@ const COMMANDS: CommandDefinition[] = [
     description: "顯示目前局況摘要",
   },
   {
+    name: "hand",
+    kind: "local",
+    usage: "/hand",
+    description: "顯示目前手牌摘要",
+  },
+  {
     name: "discard",
     kind: "action",
     action: "discard",
@@ -81,7 +87,7 @@ export function findCommandDefinition(name: string): CommandDefinition | undefin
 }
 
 export function getAlwaysAvailableCommandHints(): string[] {
-  return ["/help", "/status"];
+  return ["/help", "/status", "/hand"];
 }
 
 export function getAvailableCommandHints(actions: string[]): string[] {

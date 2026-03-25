@@ -52,6 +52,22 @@
 - **WHEN** 倒數尚未結束前，玩家已成功執行其他合法命令
 - **THEN** 系統取消目前的 pass 倒數
 
+### Requirement: 事件流捲動快捷鍵
+
+系統 SHALL 提供事件流歷史導覽快捷鍵，讓玩家在底部命令列維持主要輸入入口的前提下，仍可直接控制中間事件流。`PageUp` MUST 將事件流往較早內容捲動、`PageDown` MUST 將事件流往較新內容捲動、`Home` MUST 跳到最早可見內容、`End` MUST 跳回最新內容並恢復自動跟隨；這些操作 MUST 為前端本地行為，不得送出 IPC，也不得改寫目前命令列文字。
+
+#### Scenario: 玩家以導覽鍵回看較早事件
+- **WHEN** 玩家按下 `PageUp` 或 `Home`
+- **THEN** 系統在本地捲動中間事件流，且不送出任何遊戲 action 或改變命令列內容
+
+#### Scenario: 玩家回到最新事件並恢復跟隨
+- **WHEN** 玩家按下 `End`
+- **THEN** 系統將事件流跳到最新內容，並在後續新事件追加時自動跟隨到底部
+
+#### Scenario: 玩家向較新內容逐步前進
+- **WHEN** 玩家按下 `PageDown`
+- **THEN** 系統在本地將事件流往較新內容捲動；若已無更晚內容，畫面保持在目前位置
+
 ### Requirement: DiceLobby 使用 OpenTUI 鍵盤 API
 
 DiceLobby SHALL 使用 `useKeyboard()` hook 監聽按鍵，不直接操作 `process.stdin`。
@@ -63,3 +79,14 @@ DiceLobby SHALL 使用 `useKeyboard()` hook 監聽按鍵，不直接操作 `proc
 #### Scenario: stdin 狀態不受影響
 - **WHEN** DiceLobby unmount 後 GameTable 掛載
 - **THEN** `useKeyboard()` 在 GameTable 中正常運作，不受 DiceLobby 影響
+
+### Requirement: 手牌查詢快捷鍵
+系統 SHALL 提供 `Ctrl+o` 作為 `/hand` 的預設快捷鍵 accelerator。此快捷鍵 MUST 經由與命令列輸入相同的 command registry、normalization 與 execute path，不得直接繞過命令層操作事件流或 state。
+
+#### Scenario: 玩家按下手牌查詢快捷鍵
+- **WHEN** 玩家在對局主畫面按下 `Ctrl+o`
+- **THEN** 系統執行與輸入 `/hand` 相同的命令流程，並在事件流顯示相同的手牌摘要結果
+
+#### Scenario: 快捷鍵仍走命令系統
+- **WHEN** `Ctrl+o` 觸發手牌查詢
+- **THEN** 系統重用既有 command system，而不是新增一條獨立的 hotkey-only hand display 路徑

@@ -2,6 +2,7 @@ import { createSignal, createMemo } from "solid-js";
 import type { CanonicalTile } from "../tiles/types";
 import { buildTileCatalogMap, type ZigTileEntry } from "../tiles/catalog-map";
 import { formatTileLabel } from "../tiles";
+import { formatHandSummaryLines } from "./hand-summary";
 import { getAlwaysAvailableCommandHints, getAvailableCommandHints } from "../commands/registry";
 
 // ---- Types from Zig protocol ----
@@ -156,6 +157,32 @@ function diffStateMessages(
   return messages;
 }
 
+function viewerDrewTile(previous: ZigGameState | null, next: ZigGameState): boolean {
+  return previous !== null
+    && next.current_player_id === 0
+    && next.drawn_tile_id !== null
+    && next.drawn_tile_id !== previous.drawn_tile_id;
+}
+
+function buildHandEntries(
+  state: ZigGameState | null,
+  tileCatalog: Map<number, CanonicalTile>,
+): HandEntry[] {
+  if (!state) return [];
+
+  const player0 = state.players[0];
+  if (!player0 || !player0.hand) return [];
+
+  const entries: HandEntry[] = [];
+  for (const id of player0.hand) {
+    const tile = tileCatalog.get(id);
+    if (tile) {
+      entries.push({ id, tile });
+    }
+  }
+  return entries;
+}
+
 // ---- useGameState hook ----
 
 export function useGameState() {
@@ -210,6 +237,17 @@ export function useGameState() {
     for (const message of messages) {
       appendEvent("game", message);
     }
+
+    if (viewerDrewTile(previousState, msg.state)) {
+      const lines = formatHandSummaryLines(
+        buildHandEntries(msg.state, catalog),
+        msg.state.drawn_tile_id,
+        catalog.get(msg.state.drawn_tile_id!) ?? null,
+      );
+      for (const line of lines) {
+        appendEvent("system", line);
+      }
+    }
   }
 
   function applyTurnChanged(msg: ZigTurnChangedMessage): void {
@@ -240,21 +278,7 @@ export function useGameState() {
   }
 
   const handWithIds = createMemo<HandEntry[]>(() => {
-    const state = gameState();
-    const catalog = tileCatalog();
-    if (!state) return [];
-
-    const player0 = state.players[0];
-    if (!player0 || !player0.hand) return [];
-
-    const entries: HandEntry[] = [];
-    for (const id of player0.hand) {
-      const tile = catalog.get(id);
-      if (tile) {
-        entries.push({ id, tile });
-      }
-    }
-    return entries;
+    return buildHandEntries(gameState(), tileCatalog());
   });
 
   const seatWinds = createMemo<string[]>(() => {

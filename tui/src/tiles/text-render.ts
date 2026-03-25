@@ -60,9 +60,27 @@ export function resolveTileTextTemplateByKey(textKey: string): TileTextTemplate 
   }
 
   if (sections[0] === "bonus" && sections[1] && sections[2]) {
+    const ordinal = Number(sections[2]);
+    if (!Number.isInteger(ordinal) || ordinal < 1 || ordinal > 4) {
+      throw new Error(`Invalid bonus text key: ${textKey}`);
+    }
+
+    const top = String(ordinal);
+    const bottom = sections[1] === "season"
+      ? seasonToZh(ordinal)
+      : sections[1] === "flower"
+        ? flowerToZh(ordinal)
+        : null;
+
+    if (!bottom) {
+      throw new Error(`Unsupported bonus text key: ${textKey}`);
+    }
+
     return {
-      ...PLACEHOLDER_TEMPLATE,
       key: textKey,
+      top,
+      bottom,
+      status: "ready",
     };
   }
 
@@ -183,4 +201,20 @@ function dragonToZh(dragon: string): string {
     return "";
   }
   throw new Error(`Unsupported dragon for text template: ${dragon}`);
+}
+
+function seasonToZh(ordinal: number): string {
+  if (ordinal === 1) return "春";
+  if (ordinal === 2) return "夏";
+  if (ordinal === 3) return "秋";
+  if (ordinal === 4) return "冬";
+  throw new Error(`Unsupported season ordinal: ${ordinal}`);
+}
+
+function flowerToZh(ordinal: number): string {
+  if (ordinal === 1) return "梅";
+  if (ordinal === 2) return "蘭";
+  if (ordinal === 3) return "菊";
+  if (ordinal === 4) return "竹";
+  throw new Error(`Unsupported flower ordinal: ${ordinal}`);
 }
