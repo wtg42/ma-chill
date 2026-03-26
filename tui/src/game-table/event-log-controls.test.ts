@@ -62,23 +62,20 @@ describe("event log viewport helpers", () => {
   it("derives local viewport state from scroll metrics", () => {
     expect(toEventLogViewportState({ scrollTop: 5, scrollHeight: 20, viewportHeight: 10 })).toEqual({
       scrollTop: 5,
-      isFollowingLatest: false,
     });
 
     expect(toEventLogViewportState({ scrollTop: 10, scrollHeight: 20, viewportHeight: 10 })).toEqual({
       scrollTop: 10,
-      isFollowingLatest: true,
     });
   });
 
-  it("pages through history and restores follow mode at the bottom", () => {
+  it("pages through history", () => {
     expect(applyEventLogScrollRequest(
       { kind: "page_up", token: 1 },
       { scrollTop: 20, scrollHeight: 40, viewportHeight: 10 },
     )).toEqual({
       nextScrollTop: 10,
       scrollTop: 10,
-      isFollowingLatest: false,
     });
 
     expect(applyEventLogScrollRequest(
@@ -87,7 +84,6 @@ describe("event log viewport helpers", () => {
     )).toEqual({
       nextScrollTop: 20,
       scrollTop: 20,
-      isFollowingLatest: false,
     });
 
     expect(applyEventLogScrollRequest(
@@ -96,7 +92,6 @@ describe("event log viewport helpers", () => {
     )).toEqual({
       nextScrollTop: 30,
       scrollTop: 30,
-      isFollowingLatest: true,
     });
   });
 });

@@ -8,11 +8,11 @@ export interface EventLogViewportMetrics {
 
 export interface EventLogViewportState {
   scrollTop: number;
-  isFollowingLatest: boolean;
 }
 
-export interface EventLogScrollResult extends EventLogViewportState {
+export interface EventLogScrollResult {
   nextScrollTop: number;
+  scrollTop: number;
 }
 
 export interface EventLogScrollRequest {
@@ -47,7 +47,6 @@ export function isEventLogAtBottom(metrics: EventLogViewportMetrics): boolean {
 export function toEventLogViewportState(metrics: EventLogViewportMetrics): EventLogViewportState {
   return {
     scrollTop: metrics.scrollTop,
-    isFollowingLatest: isEventLogAtBottom(metrics),
   };
 }
 
@@ -76,7 +75,6 @@ export function applyEventLogScrollRequest(
   return {
     nextScrollTop,
     scrollTop: nextScrollTop,
-    isFollowingLatest: nextScrollTop >= maxScrollTop - EVENT_LOG_SCROLL_TOLERANCE,
   };
 }
 

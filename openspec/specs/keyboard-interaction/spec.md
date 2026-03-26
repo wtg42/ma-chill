@@ -8,6 +8,8 @@
 
 所有玩家互動 SHALL 經由 command system 統一處理。底部命令列為主要互動入口，slash 指令為主要操作方式；通用快捷鍵僅作為常用命令的 accelerator。鍵盤事件 SHALL 先進入命令層，再決定是本地命令、查詢命令或送往 Zig core 的遊戲動作。
 
+唯一例外：當畫面有活躍的文字選取（selection）時，`Ctrl+C` SHALL 優先執行「複製選取文字到剪貼簿」，而不是進入命令層。無 selection 時 `Ctrl+C` SHALL 維持既有行為。
+
 #### Scenario: 玩家以命令列執行動作
 - **WHEN** 玩家在底部命令列輸入 slash 指令並送出
 - **THEN** 系統透過 command system 解析與執行該操作
@@ -15,6 +17,14 @@
 #### Scenario: 快捷鍵仍走命令層
 - **WHEN** 玩家按下某個通用快捷鍵
 - **THEN** 系統將該快捷鍵映射為相同命令語義，而不是直接繞過命令層送出 IPC
+
+#### Scenario: Ctrl+C 有 selection 時複製文字
+- **WHEN** 畫面有活躍的文字選取且玩家按下 `Ctrl+C`
+- **THEN** 系統 SHALL 將選取文字送入 clipboard pipeline，並清除 selection，不進入命令層
+
+#### Scenario: Ctrl+C 無 selection 時維持原行為
+- **WHEN** 畫面無活躍的文字選取且玩家按下 `Ctrl+C`
+- **THEN** 系統 SHALL 維持 `Ctrl+C` 的既有行為（如退出程式或其他已定義的動作）
 
 ### Requirement: 命令列支援基本編輯操作
 
@@ -60,6 +70,8 @@
 
 系統 SHALL 提供事件流歷史導覽快捷鍵，讓玩家在底部命令列維持主要輸入入口的前提下，仍可直接控制中間事件流。`PageUp` MUST 將事件流往較早內容捲動、`PageDown` MUST 將事件流往較新內容捲動、`Home` MUST 跳到最早可見內容、`End` MUST 跳回最新內容並恢復自動跟隨；這些操作 MUST 為前端本地行為，不得送出 IPC，也不得改寫目前命令列文字。
 
+事件流 SHALL 預設處於「跟隨最新」模式：新事件加入時自動捲到底部。當使用者透過鍵盤或滑鼠滾輪手動捲離底部時，「跟隨最新」模式 SHALL 暫停，視窗停在使用者目前位置。當使用者捲回底部（包括按下 `End` 或以滑鼠滾回底部）時，「跟隨最新」模式 SHALL 自動恢復。
+
 #### Scenario: 玩家以導覽鍵回看較早事件
 - **WHEN** 玩家按下 `PageUp` 或 `Home`
 - **THEN** 系統在本地捲動中間事件流，且不送出任何遊戲 action 或改變命令列內容
@@ -71,6 +83,18 @@
 #### Scenario: 玩家向較新內容逐步前進
 - **WHEN** 玩家按下 `PageDown`
 - **THEN** 系統在本地將事件流往較新內容捲動；若已無更晚內容，畫面保持在目前位置
+
+#### Scenario: 新事件到來時自動捲到底部（預設跟隨模式）
+- **WHEN** 事件流處於「跟隨最新」模式且有新事件加入
+- **THEN** 事件流 SHALL 自動捲動到最新事件，使用者無需手動操作
+
+#### Scenario: 使用者手動捲離後新事件不打斷閱讀
+- **WHEN** 使用者透過鍵盤或滑鼠手動將事件流捲離底部，之後有新事件加入
+- **THEN** 事件流 SHALL 停留在使用者目前的捲動位置，不自動捲到底部
+
+#### Scenario: 使用者捲回底部後恢復自動跟隨
+- **WHEN** 使用者透過鍵盤（`End`/`PageDown`）或滑鼠將事件流捲回底部
+- **THEN** 事件流 SHALL 恢復「跟隨最新」模式，下一批新事件到來時再次自動捲動
 
 ### Requirement: DiceLobby 使用 OpenTUI 鍵盤 API
 
