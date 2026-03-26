@@ -48,17 +48,10 @@ pub const Session = struct {
 
     /// 等待 TUI 傳來 player_action 訊息。
     /// 非 player_action 訊息會被略過，繼續等待。
-    /// timeout_ms 為 null 表示無限等待；非 null 時超過時限自動回傳 pass。
-    pub fn receivePlayerAction(self: *Session, timeout_ms: ?u64) !protocol.PlayerActionMessage {
+    /// Pass timeout 由 TUI 端 auto-pass timer 負責。
+    pub fn receivePlayerAction(self: *Session) !protocol.PlayerActionMessage {
         var read_buffer: [READ_BUFFER_SIZE]u8 = undefined;
         var reader = self.stream.reader(self.io, &read_buffer);
-
-        if (timeout_ms) |ms| {
-            // TODO: 使用 std.Io.Timeout 實作非阻塞超時
-            // 目前 TUI 尚未實作 IPC，暫時以短暫 sleep 模擬並回傳 pass
-            _ = ms;
-            return .{ .action = .pass, .tile_id = null };
-        }
 
         while (true) {
             const line = reader.interface.takeDelimiterExclusive('\n') catch |err| switch (err) {
@@ -96,15 +89,3 @@ test "Session.sendMessage writes valid JSONL to stream" {
     try std.testing.expect(output[output.len - 1] == '\n');
 }
 
-test "Session.receivePlayerAction returns pass on timeout" {
-    // timeout_ms 非 null 時，目前實作立即回傳 pass（TODO: 實際 timer）
-    const allocator = std.testing.allocator;
-    // Session 不需要真實 stream，因為 timeout 路徑不讀取 stream
-    // 用零值佔位，不會被呼叫到
-    const dummy_stream: std.Io.net.Stream = undefined;
-    const dummy_io: std.Io = undefined;
-    var session = Session.init(dummy_stream, dummy_io, allocator);
-    const result = try session.receivePlayerAction(5000);
-    try std.testing.expectEqual(protocol.ActionType.pass, result.action);
-    try std.testing.expectEqual(@as(?u8, null), result.tile_id);
-}

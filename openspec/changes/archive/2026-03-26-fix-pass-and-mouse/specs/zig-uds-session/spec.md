@@ -1,10 +1,4 @@
-# zig-uds-session
-
-## Purpose
-
-定義 `Session` struct 的行為：封裝與單一 TUI client 的 UDS 雙向連線，提供傳送訊息與接收玩家動作的操作介面。
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Session 封裝雙向 UDS 連線
 系統 SHALL 提供 `Session` struct，持有與單一 TUI client 的 stream，並提供 `sendMessage` 與 `receivePlayerAction` 兩個操作介面。
@@ -20,3 +14,9 @@
 #### Scenario: 收到非 player_action 訊息
 - **WHEN** stream 傳來的訊息不是 `player_action` 型別
 - **THEN** Session SHALL 忽略該訊息並繼續等待下一條
+
+## REMOVED Requirements
+
+### Requirement: 接收玩家動作（有 timeout）
+**Reason**: Pass timeout 責任移至 TUI 端 auto-pass timer，Zig core 不再需要獨立超時機制
+**Migration**: 所有呼叫 `receivePlayerAction(timeout_ms)` 的地方改為 `receivePlayerAction()`，移除 timeout 參數

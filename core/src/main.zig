@@ -6,7 +6,8 @@ const ai = core.ai;
 const protocol = ipc.protocol;
 const session_mod = ipc.session;
 
-const PASS_TIMEOUT_MS: u64 = 5_000;
+/// TUI auto-pass timer 的秒數，透過 init 訊息傳給 TUI。
+const PASS_TIMEOUT_SECONDS: u16 = 5;
 
 /// 遊戲主程式。
 /// 啟動順序：開 UDS socket → spawn TUI → 等待連線 → 推送 init → 執行 playRound。
@@ -39,7 +40,7 @@ pub fn main(init: std.process.Init) !void {
     defer game_state.deinit();
 
     // 5. 推送 init 訊息
-    var init_msg = try game.round.buildInitMessage(arena, &catalog, &game_state, PASS_TIMEOUT_MS / 1000);
+    var init_msg = try game.round.buildInitMessage(arena, &catalog, &game_state, PASS_TIMEOUT_SECONDS);
     defer init_msg.deinit(arena);
     try session.sendMessage(init_msg);
 
@@ -47,7 +48,7 @@ pub fn main(init: std.process.Init) !void {
     try session.waitForPlayerReady();
 
     // 6. 執行遊戲迴圈
-    var driver = GameDriver{ .session = &session, .pass_timeout_ms = PASS_TIMEOUT_MS };
+    var driver = GameDriver{ .session = &session };
     const result = try game.round.playRound(arena, &game_state, &driver);
 
     // 7. 等待 TUI 結束並 log 結果
@@ -58,23 +59,20 @@ pub fn main(init: std.process.Init) !void {
 /// 持有 Session，提供 playRound 所需的 turn_decider、claim_decider、sink。
 const GameDriver = struct {
     session: *session_mod.Session,
-    pass_timeout_ms: u64,
 
-    /// player 0 從 TUI 讀取動作；AI 玩家呼叫 ai.agent.decide()。
-    /// 若可用動作含 pass（副露詢問），player 0 有 timeout；棄牌回合無 timeout。
+    /// player 0 從 TUI 讀取動作（blocking read，pass timeout 由 TUI timer 負責）；
+    /// AI 玩家呼叫 ai.agent.decide()。
     pub fn turnDecide(self: *GameDriver, gs: *const game.state.GameState, turn_changed: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
         if (turn_changed.player_id == 0) {
-            const has_pass = containsAction(turn_changed.available_actions, .pass);
-            const timeout = if (has_pass) self.pass_timeout_ms else null;
-            return self.session.receivePlayerAction(timeout);
+            return self.session.receivePlayerAction();
         }
         return ai.agent.decide(gs, turn_changed.player_id, ai.agent.presets.conservative, turn_changed.available_actions);
     }
 
-    /// claim_decider：同 turnDecide 邏輯（副露詢問永遠有 timeout）。
+    /// claim_decider：同 turnDecide 邏輯。
     pub fn claimDecide(self: *GameDriver, gs: *const game.state.GameState, _: u8, turn_changed: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
         if (turn_changed.player_id == 0) {
-            return self.session.receivePlayerAction(self.pass_timeout_ms);
+            return self.session.receivePlayerAction();
         }
         return ai.agent.decide(gs, turn_changed.player_id, ai.agent.presets.conservative, turn_changed.available_actions);
     }
@@ -84,11 +82,6 @@ const GameDriver = struct {
         try self.session.sendMessage(message);
     }
 };
-
-fn containsAction(actions: []const protocol.ActionType, action: protocol.ActionType) bool {
-    for (actions) |a| if (a == action) return true;
-    return false;
-}
 
 fn spawnTui(io: std.Io, allocator: std.mem.Allocator, environ_map: *const std.process.Environ.Map, socket_path: []const u8) !std.process.Child {
     var child_environ = try environ_map.clone(allocator);
@@ -183,7 +176,7 @@ test "GameDriver.turnDecide uses AI for non-player-0" {
     const dummy_stream: std.Io.net.Stream = undefined;
     const dummy_io: std.Io = undefined;
     var sess = session_mod.Session.init(dummy_stream, dummy_io, allocator);
-    var driver = GameDriver{ .session = &sess, .pass_timeout_ms = 5000 };
+    var driver = GameDriver{ .session = &sess };
 
     var actions = [_]protocol.ActionType{.discard};
     const turn_changed = protocol.TurnChangedMessage{
