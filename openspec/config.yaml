@@ -1,7 +1,7 @@
 schema: spec-driven
 
 context: |
-  語言：中文（繁體）
+  語言：繁體中文（zh-tw）
   所有產出物必須用繁體中文撰寫。
 
 # Project context (optional)
