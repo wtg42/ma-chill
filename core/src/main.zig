@@ -5,6 +5,7 @@ const ipc = core.ipc;
 const ai = core.ai;
 const protocol = ipc.protocol;
 const session_mod = ipc.session;
+const pacing = ai.pacing;
 
 /// TUI auto-pass timer 的秒數，透過 init 訊息傳給 TUI。
 const PASS_TIMEOUT_SECONDS: u16 = 5;
@@ -34,6 +35,7 @@ pub fn main(init: std.process.Init) !void {
     const ts = std.Io.Clock.real.now(init.io);
     var prng = std.Random.DefaultPrng.init(@intCast(ts.toMilliseconds()));
     game.deck.shuffle(prng.random(), &catalog);
+    var ai_pacing = pacing.Controller.init(pacing.profileFromEnviron(init.environ_map), @intCast(ts.toMilliseconds()), pacing.Sleeper.thread());
 
     const dealer_player_id: u8 = prng.random().intRangeAtMost(u8, 0, 3);
     var game_state = try game.round.initGameState(arena, &catalog, dealer_player_id);
@@ -48,7 +50,7 @@ pub fn main(init: std.process.Init) !void {
     try session.waitForPlayerReady();
 
     // 6. 執行遊戲迴圈
-    var driver = GameDriver{ .session = &session };
+    var driver = GameDriver{ .session = &session, .ai_pacing = &ai_pacing };
     const result = try game.round.playRound(arena, &game_state, &driver);
 
     // 7. 等待 TUI 結束並 log 結果
@@ -59,6 +61,7 @@ pub fn main(init: std.process.Init) !void {
 /// 持有 Session，提供 playRound 所需的 turn_decider、claim_decider、sink。
 const GameDriver = struct {
     session: *session_mod.Session,
+    ai_pacing: *pacing.Controller,
 
     /// player 0 從 TUI 讀取動作（blocking read，pass timeout 由 TUI timer 負責）；
     /// AI 玩家呼叫 ai.agent.decide()。
@@ -75,6 +78,12 @@ const GameDriver = struct {
             return self.session.receivePlayerAction();
         }
         return ai.agent.decide(gs, turn_changed.player_id, ai.agent.presets.conservative, turn_changed.available_actions);
+    }
+
+    /// 只在 AI 玩家階段套用 pacing；真人玩家保持即時可操作。
+    pub fn pace(self: *GameDriver, player_id: u8, phase: pacing.Phase) !void {
+        if (player_id == 0) return;
+        self.ai_pacing.pause(phase);
     }
 
     /// 將 playRound 產生的訊息轉發給 TUI。
@@ -176,7 +185,8 @@ test "GameDriver.turnDecide uses AI for non-player-0" {
     const dummy_stream: std.Io.net.Stream = undefined;
     const dummy_io: std.Io = undefined;
     var sess = session_mod.Session.init(dummy_stream, dummy_io, allocator);
-    var driver = GameDriver{ .session = &sess };
+    var ai_pacing = pacing.Controller.init(.off, 42, .{ .context = null, .callback = noopSleep });
+    var driver = GameDriver{ .session = &sess, .ai_pacing = &ai_pacing };
 
     var actions = [_]protocol.ActionType{.discard};
     const turn_changed = protocol.TurnChangedMessage{
@@ -186,3 +196,33 @@ test "GameDriver.turnDecide uses AI for non-player-0" {
     const action = try driver.turnDecide(&game_state, turn_changed);
     try std.testing.expectEqual(protocol.ActionType.discard, action.action);
 }
+
+test "GameDriver.pace 只對 AI 玩家套用等待" {
+    const allocator = std.testing.allocator;
+
+    const Recorder = struct {
+        count: usize = 0,
+
+        /// 記錄 sleep 呼叫次數，供測試驗證 GameDriver.pace 使用。
+        fn callback(ctx: ?*anyopaque, _: u64) void {
+            const self: *@This() = @ptrCast(@alignCast(ctx.?));
+            self.count += 1;
+        }
+    };
+
+    const dummy_stream: std.Io.net.Stream = undefined;
+    const dummy_io: std.Io = undefined;
+    var sess = session_mod.Session.init(dummy_stream, dummy_io, allocator);
+    var recorder = Recorder{};
+    var ai_pacing = pacing.Controller.init(.normal, 7, .{ .context = &recorder, .callback = Recorder.callback });
+    var driver = GameDriver{ .session = &sess, .ai_pacing = &ai_pacing };
+
+    try driver.pace(0, .after_turn_prompt);
+    try std.testing.expectEqual(@as(usize, 0), recorder.count);
+
+    try driver.pace(2, .after_turn_prompt);
+    try std.testing.expectEqual(@as(usize, 1), recorder.count);
+}
+
+/// 測試用 no-op sleeper，避免引入真實等待時間。
+fn noopSleep(_: ?*anyopaque, _: u64) void {}

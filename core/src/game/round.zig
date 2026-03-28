@@ -8,6 +8,7 @@ const transitions = @import("transitions.zig");
 const claims = @import("claims.zig");
 const protocol = @import("../ipc/protocol.zig");
 const scoring = @import("../rules/scoring.zig");
+const pacing = @import("../ai/pacing.zig");
 
 pub const RoundResult = struct {
     winner_id: ?u8,
@@ -51,10 +52,11 @@ pub fn availableActionsForPlayer(allocator: std.mem.Allocator, game_state: *cons
     return action_availability.forPlayer(allocator, game_state, player_id, discarded_tile_id, discarder_player_id);
 }
 
-/// driver: anytype — 需提供三個方法：
+/// driver: anytype — 需提供四個方法：
 ///   fn turnDecide(*T, *const state.GameState, TurnChangedMessage) !PlayerActionMessage
 ///   fn claimDecide(*T, *const state.GameState, u8, TurnChangedMessage) !PlayerActionMessage
 ///   fn sink(*T, protocol.Message) !void
+///   fn pace(*T, u8, pacing.Phase) !void（可選）
 pub fn playRound(allocator: std.mem.Allocator, game_state: *state.GameState, driver: anytype) !RoundResult {
     var pending_draw = true;
 
@@ -72,11 +74,13 @@ pub fn playRound(allocator: std.mem.Allocator, game_state: *state.GameState, dri
                 return .{ .winner_id = null, .scores = game_state.scores };
             }
             try emitStateUpdate(allocator, game_state, driver);
+            try pacePlayer(driver, game_state.current_player_id, .after_draw_revealed);
         }
 
         const turn_changed = try buildTurnChangedMessage(allocator, game_state, game_state.current_player_id, null, null);
         defer allocator.free(turn_changed.available_actions);
         try driver.sink(.{ .turn_changed = turn_changed });
+        try pacePlayer(driver, turn_changed.player_id, .after_turn_prompt);
 
         const turn_action = try driver.turnDecide(game_state, turn_changed);
         if (!action_availability.containsAction(turn_changed.available_actions, turn_action.action)) {
@@ -88,6 +92,7 @@ pub fn playRound(allocator: std.mem.Allocator, game_state: *state.GameState, dri
             .kong => {
                 try transitions.applyClosedKong(game_state, turn_action.tile_id orelse return error.InvalidTile);
                 try emitStateUpdate(allocator, game_state, driver);
+                try pacePlayer(driver, game_state.current_player_id, .after_action_resolved);
                 pending_draw = true;
                 continue;
             },
@@ -97,6 +102,7 @@ pub fn playRound(allocator: std.mem.Allocator, game_state: *state.GameState, dri
 
                 try transitions.discardTile(game_state, discarder, discarded_tile_id);
                 try emitStateUpdate(allocator, game_state, driver);
+                try pacePlayer(driver, discarder, .after_action_resolved);
 
                 const claim_outcome = try resolveClaims(allocator, game_state, discarded_tile_id, driver);
                 game_state.turn_count += 1;
@@ -109,6 +115,7 @@ pub fn playRound(allocator: std.mem.Allocator, game_state: *state.GameState, dri
                     .claim_turn => |claim_turn| {
                         game_state.current_player_id = claim_turn.player_id;
                         try emitStateUpdate(allocator, game_state, driver);
+                        try pacePlayer(driver, claim_turn.player_id, .after_action_resolved);
                         pending_draw = claim_turn.pending_draw;
                     },
                     .win => |winner_id| return finishWin(game_state, winner_id, discarded_tile_id, false, driver),
@@ -137,6 +144,16 @@ pub fn buildInitMessage(allocator: std.mem.Allocator, catalog: []const tile.Tile
     } };
 }
 
+/// 若 driver 有實作 pace hook，則在指定玩家與 phase 套用節奏控制。
+fn pacePlayer(driver: anytype, player_id: u8, phase: pacing.Phase) !void {
+    const DriverType = switch (@typeInfo(@TypeOf(driver))) {
+        .pointer => |pointer_info| pointer_info.child,
+        else => @TypeOf(driver),
+    };
+    if (!@hasDecl(DriverType, "pace")) return;
+    try driver.pace(player_id, phase);
+}
+
 fn resolveClaims(allocator: std.mem.Allocator, game_state: *state.GameState, discarded_tile_id: u8, driver: anytype) !claims.Outcome {
     var choices: [state.player_count - 1]?claims.ClaimChoice = .{ null, null, null };
     var choice_count: usize = 0;
@@ -151,6 +168,7 @@ fn resolveClaims(allocator: std.mem.Allocator, game_state: *state.GameState, dis
         }
 
         try driver.sink(.{ .turn_changed = turn_changed });
+        try pacePlayer(driver, player_id, .after_claim_prompt);
         const response = try driver.claimDecide(game_state, discarded_tile_id, turn_changed);
         if (!action_availability.containsAction(turn_changed.available_actions, response.action)) {
             return error.IllegalAction;
@@ -342,6 +360,180 @@ test "playRound integrates AI decisions and can end in a win" {
     const result = try playRound(allocator, &game_state, &driver);
     try std.testing.expectEqual(@as(?u8, 0), result.winner_id);
     try std.testing.expect(driver.game_over_seen);
+}
+
+test "playRound 會依序觸發 AI pacing phase" {
+    const allocator = std.testing.allocator;
+    const catalog = tile.generateCatalog();
+    var game_state = state.GameState.init(allocator);
+    defer game_state.deinit();
+
+    for (0..state.player_count) |player_id| {
+        try game_state.players[player_id].hand.appendSlice(allocator, catalog[player_id * 16 .. player_id * 16 + 16]);
+    }
+    try game_state.wall.append(allocator, catalog[100]);
+    game_state.current_player_id = 1;
+
+    const Driver = struct {
+        phases: [3]pacing.Phase = undefined,
+        player_ids: [3]u8 = undefined,
+        count: usize = 0,
+
+        fn turnDecide(_: *@This(), gs: *const state.GameState, _: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            return .{ .action = .discard, .tile_id = gs.players[gs.current_player_id].hand.items[0].id };
+        }
+
+        fn claimDecide(_: *@This(), _: *const state.GameState, _: u8, _: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            return .{ .action = .pass, .tile_id = null };
+        }
+
+        fn sink(_: *@This(), _: protocol.Message) !void {}
+
+        fn pace(self: *@This(), player_id: u8, phase: pacing.Phase) !void {
+            self.player_ids[self.count] = player_id;
+            self.phases[self.count] = phase;
+            self.count += 1;
+        }
+    };
+
+    var driver = Driver{};
+    const result = try playRound(allocator, &game_state, &driver);
+
+    try std.testing.expectEqual(@as(?u8, null), result.winner_id);
+    try std.testing.expectEqual(@as(usize, 3), driver.count);
+    try std.testing.expectEqual(pacing.Phase.after_draw_revealed, driver.phases[0]);
+    try std.testing.expectEqual(pacing.Phase.after_turn_prompt, driver.phases[1]);
+    try std.testing.expectEqual(pacing.Phase.after_action_resolved, driver.phases[2]);
+    try std.testing.expectEqual(@as(u8, 1), driver.player_ids[0]);
+    try std.testing.expectEqual(@as(u8, 1), driver.player_ids[1]);
+    try std.testing.expectEqual(@as(u8, 1), driver.player_ids[2]);
+}
+
+test "playRound 不會延遲真人玩家 prompt" {
+    const allocator = std.testing.allocator;
+    const catalog = tile.generateCatalog();
+    var game_state = state.GameState.init(allocator);
+    defer game_state.deinit();
+
+    for (0..state.player_count) |player_id| {
+        try game_state.players[player_id].hand.appendSlice(allocator, catalog[player_id * 16 .. player_id * 16 + 16]);
+    }
+    try game_state.wall.append(allocator, catalog[100]);
+    game_state.current_player_id = 0;
+
+    const Driver = struct {
+        pace_count: usize = 0,
+
+        fn turnDecide(_: *@This(), gs: *const state.GameState, _: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            return .{ .action = .discard, .tile_id = gs.players[gs.current_player_id].hand.items[0].id };
+        }
+
+        fn claimDecide(_: *@This(), _: *const state.GameState, _: u8, _: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            return .{ .action = .pass, .tile_id = null };
+        }
+
+        fn sink(_: *@This(), _: protocol.Message) !void {}
+
+        fn pace(self: *@This(), _: u8, _: pacing.Phase) !void {
+            self.pace_count += 1;
+        }
+    };
+
+    var driver = Driver{};
+    _ = try playRound(allocator, &game_state, &driver);
+
+    try std.testing.expectEqual(@as(usize, 0), driver.pace_count);
+}
+
+test "resolveClaims 遇到真人 claim prompt 時不會延遲" {
+    const allocator = std.testing.allocator;
+    const catalog = tile.generateCatalog();
+    var game_state = state.GameState.init(allocator);
+    defer game_state.deinit();
+
+    try game_state.players[1].hand.appendSlice(allocator, catalog[0..16]);
+    try game_state.players[0].hand.appendSlice(allocator, &[_]tile.Tile{ catalog[1], catalog[2] });
+    try game_state.players[2].hand.appendSlice(allocator, catalog[32..48]);
+    try game_state.players[3].hand.appendSlice(allocator, catalog[48..64]);
+    game_state.current_player_id = 1;
+
+    const Driver = struct {
+        pace_count: usize = 0,
+
+        fn turnDecide(_: *@This(), _: *const state.GameState, _: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            return .{ .action = .discard, .tile_id = null };
+        }
+
+        fn claimDecide(_: *@This(), _: *const state.GameState, _: u8, turn_changed: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            if (turn_changed.player_id == 0) {
+                return .{ .action = .pon, .tile_id = null };
+            }
+            return .{ .action = .pass, .tile_id = null };
+        }
+
+        fn sink(_: *@This(), _: protocol.Message) !void {}
+
+        fn pace(self: *@This(), _: u8, _: pacing.Phase) !void {
+            self.pace_count += 1;
+        }
+    };
+
+    var driver = Driver{};
+    const result = try resolveClaims(allocator, &game_state, catalog[0].id, &driver);
+
+    try std.testing.expectEqual(@as(usize, 0), driver.pace_count);
+    try std.testing.expect(result == .claim_turn);
+}
+
+test "playRound 會在 AI claim 流程套用 pacing" {
+    const allocator = std.testing.allocator;
+    const catalog = tile.generateCatalog();
+    var game_state = state.GameState.init(allocator);
+    defer game_state.deinit();
+
+    try game_state.players[0].hand.appendSlice(allocator, catalog[0..16]);
+    try game_state.players[1].hand.appendSlice(allocator, &[_]tile.Tile{ catalog[1], catalog[2], catalog[40] });
+    try game_state.players[2].hand.appendSlice(allocator, catalog[32..48]);
+    try game_state.players[3].hand.appendSlice(allocator, catalog[48..64]);
+    try game_state.wall.append(allocator, catalog[80]);
+    game_state.current_player_id = 0;
+
+    const Driver = struct {
+        phases: [8]pacing.Phase = undefined,
+        player_ids: [8]u8 = undefined,
+        count: usize = 0,
+
+        fn turnDecide(_: *@This(), gs: *const state.GameState, _: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            if (gs.current_player_id == 0) {
+                return .{ .action = .discard, .tile_id = catalog[0].id };
+            }
+            return .{ .action = .discard, .tile_id = gs.players[gs.current_player_id].hand.items[0].id };
+        }
+
+        fn claimDecide(_: *@This(), _: *const state.GameState, _: u8, turn_changed: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            if (turn_changed.player_id == 1) {
+                return .{ .action = .pon, .tile_id = null };
+            }
+            return .{ .action = .pass, .tile_id = null };
+        }
+
+        fn sink(_: *@This(), _: protocol.Message) !void {}
+
+        fn pace(self: *@This(), player_id: u8, phase: pacing.Phase) !void {
+            self.player_ids[self.count] = player_id;
+            self.phases[self.count] = phase;
+            self.count += 1;
+        }
+    };
+
+    var driver = Driver{};
+    _ = try playRound(allocator, &game_state, &driver);
+
+    try std.testing.expect(driver.count >= 2);
+    try std.testing.expectEqual(pacing.Phase.after_claim_prompt, driver.phases[0]);
+    try std.testing.expectEqual(pacing.Phase.after_action_resolved, driver.phases[1]);
+    try std.testing.expectEqual(@as(u8, 1), driver.player_ids[0]);
+    try std.testing.expectEqual(@as(u8, 1), driver.player_ids[1]);
 }
 
 test "emitStateUpdate serializes melds and bonus events together" {

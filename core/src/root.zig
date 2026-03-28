@@ -27,6 +27,7 @@ pub const rules = struct {
 
 pub const ai = struct {
     pub const agent = @import("ai/agent.zig");
+    pub const pacing = @import("ai/pacing.zig");
 };
 
 /// This is a documentation comment to explain the `printAnotherMessage` function below.
