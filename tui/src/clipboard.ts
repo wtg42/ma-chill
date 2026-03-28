@@ -6,17 +6,31 @@ export async function copyToClipboard(
   text: string,
   renderer?: OscRenderer,
 ): Promise<boolean> {
-  // OSC 52: best for SSH/tmux remote sessions
+  // Local environment: prefer OS tools (more reliable than OSC 52 through tmux)
+  const isLocal =
+    process.env.WAYLAND_DISPLAY ||
+    process.env.DISPLAY ||
+    process.platform === "darwin";
+
+  if (isLocal) {
+    if (await tryOSToolFallback(text)) return true;
+  }
+
+  // OSC 52: fallback for SSH/remote sessions without OS tools
   if (renderer) {
     try {
       const ok = renderer.copyToClipboardOSC52(text);
       if (ok) return true;
     } catch {
-      // fall through to OS tools
+      // ignore
     }
   }
 
-  return await tryOSToolFallback(text);
+  if (!isLocal) {
+    return await tryOSToolFallback(text);
+  }
+
+  return false;
 }
 
 async function tryOSToolFallback(text: string): Promise<boolean> {
