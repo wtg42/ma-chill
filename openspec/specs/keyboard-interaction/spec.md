@@ -6,17 +6,17 @@
 
 ### Requirement: 鍵盤驅動設計原則
 
-所有玩家互動 SHALL 經由 command system 統一處理。底部命令列為主要互動入口，slash 指令為主要操作方式；通用快捷鍵僅作為常用命令的 accelerator。鍵盤事件 SHALL 先進入命令層，再決定是本地命令、查詢命令或送往 Zig core 的遊戲動作。
+所有玩家互動 SHALL 經由 command system 統一處理。底部命令列為主要互動入口，分為三態：NORMAL（靜態提示）、LEADER（which-key 面板）、COMMAND（slash 指令輸入）。Leader 鍵（`Space`）開啟 which-key 面板，所有遊戲快捷鍵以 `<leader>+<key>` 形式觸發命令；`:`（shift+;）進入命令輸入模式。不再使用 `Ctrl+<letter>` accelerator 組合。
 
 唯一例外：當畫面有活躍的文字選取（selection）時，`Ctrl+C` SHALL 優先執行「複製選取文字到剪貼簿」，而不是進入命令層。無 selection 時 `Ctrl+C` SHALL 維持既有行為。
 
 #### Scenario: 玩家以命令列執行動作
-- **WHEN** 玩家在底部命令列輸入 slash 指令並送出
-- **THEN** 系統透過 command system 解析與執行該操作
+- **WHEN** 玩家進入 COMMAND MODE（按 `:`）後輸入 slash 指令並送出
+- **THEN** 系統透過 command system 解析與執行該操作，並返回 NORMAL MODE
 
-#### Scenario: 快捷鍵仍走命令層
-- **WHEN** 玩家按下某個通用快捷鍵
-- **THEN** 系統將該快捷鍵映射為相同命令語義，而不是直接繞過命令層送出 IPC
+#### Scenario: leader binding 仍走命令層
+- **WHEN** 玩家在 LEADER MODE 按下某個有效的 leader binding 鍵
+- **THEN** 系統將該 binding 映射為相同命令語義，經由 executeCommand 執行，而不是直接繞過命令層送出 IPC
 
 #### Scenario: Ctrl+C 有 selection 時複製文字
 - **WHEN** 畫面有活躍的文字選取且玩家按下 `Ctrl+C`
@@ -25,30 +25,6 @@
 #### Scenario: Ctrl+C 無 selection 時維持原行為
 - **WHEN** 畫面無活躍的文字選取且玩家按下 `Ctrl+C`
 - **THEN** 系統 SHALL 維持 `Ctrl+C` 的既有行為（如退出程式或其他已定義的動作）
-
-### Requirement: 命令列支援基本編輯操作
-
-系統 SHALL 支援在底部命令列輸入文字、刪除字元、移動游標與送出命令，讓玩家可在同一個輸入入口完成所有 slash 操作。
-
-#### Scenario: 玩家編輯命令內容
-- **WHEN** 玩家在命令列輸入文字並使用基本編輯按鍵
-- **THEN** 畫面中的命令列內容與游標位置正確更新
-
-#### Scenario: 玩家送出命令
-- **WHEN** 玩家在命令列按下送出鍵
-- **THEN** 系統以目前輸入內容執行命令解析流程
-
-### Requirement: 可用命令提示取代固定熱鍵提示
-
-系統 SHALL 依當前局面顯示可用命令提示，而不是要求玩家記憶每張手牌位置鍵或固定動作熱鍵。提示內容 SHALL 反映目前可執行的遊戲動作與常用查詢命令。
-
-#### Scenario: 輪到玩家棄牌
-- **WHEN** 當前回合允許玩家棄牌
-- **THEN** 狀態列或命令提示顯示對應的棄牌命令格式與可用參數提示
-
-#### Scenario: 玩家處於 claim 視窗
-- **WHEN** 當前 `available_actions` 含 `chi`、`pon` 或 `win`
-- **THEN** 狀態列或命令提示顯示可直接執行的對應命令
 
 ### Requirement: 自動 pass 仍由本地計時觸發
 
@@ -109,12 +85,13 @@ DiceLobby SHALL 使用 `useKeyboard()` hook 監聽按鍵，不直接操作 `proc
 - **THEN** `useKeyboard()` 在 GameTable 中正常運作，不受 DiceLobby 影響
 
 ### Requirement: 手牌查詢快捷鍵
-系統 SHALL 提供 `Ctrl+o` 作為 `/hand` 的預設快捷鍵 accelerator。此快捷鍵 MUST 經由與命令列輸入相同的 command registry、normalization 與 execute path，不得直接繞過命令層操作事件流或 state。
+
+系統 SHALL 提供 `<leader>+o` 作為 `/hand` 的預設快捷鍵 binding。此快捷鍵 MUST 經由與命令列輸入相同的 command registry、normalization 與 execute path，不得直接繞過命令層操作事件流或 state。
 
 #### Scenario: 玩家按下手牌查詢快捷鍵
-- **WHEN** 玩家在對局主畫面按下 `Ctrl+o`
+- **WHEN** 玩家在 LEADER MODE 按下 `o`
 - **THEN** 系統執行與輸入 `/hand` 相同的命令流程，並在事件流顯示相同的手牌摘要結果
 
 #### Scenario: 快捷鍵仍走命令系統
-- **WHEN** `Ctrl+o` 觸發手牌查詢
+- **WHEN** `<leader>+o` 觸發手牌查詢
 - **THEN** 系統重用既有 command system，而不是新增一條獨立的 hotkey-only hand display 路徑

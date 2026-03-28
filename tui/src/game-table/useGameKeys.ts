@@ -84,15 +84,6 @@ export function useGameKeys(
 
     // Discard actions
     if (actions.includes("discard")) {
-      // Space = discard drawn tile
-      if (name === "space") {
-        const state = store.gameState();
-        if (state && state.drawn_tile_id != null) {
-          submitAction("discard", state.drawn_tile_id);
-        }
-        return;
-      }
-
       // Tile position hotkeys
       const tileIndex = TILE_HOTKEYS.indexOf(name);
       if (tileIndex !== -1) {

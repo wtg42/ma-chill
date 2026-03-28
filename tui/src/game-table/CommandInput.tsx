@@ -1,9 +1,15 @@
-import { JSX, createMemo } from "solid-js";
+import { JSX, For, createMemo } from "solid-js";
+import type { Accessor } from "solid-js";
+import { Switch, Match } from "solid-js";
 import type { GameStateStore } from "../game-state";
 import { executeCommand } from "../commands";
+import { LEADER_BINDINGS, type UiMode } from "./useCommandKeys";
 
 interface Props {
   store: GameStateStore;
+  uiMode: Accessor<UiMode>;
+  availableActions: Accessor<string[]>;
+  onExitCommand: () => void;
 }
 
 export function CommandInput(props: Props): JSX.Element {
@@ -17,27 +23,60 @@ export function CommandInput(props: Props): JSX.Element {
   });
 
   const submit = (value: string) => {
-    const result = executeCommand(value, props.store);
-    if (result.ok) {
-      props.store.setCommandInput("");
-    }
+    executeCommand(value, props.store);
+    props.store.setCommandInput("");
+    props.onExitCommand();
+  };
+
+  const feedbackEl = () => {
+    const fb = feedback();
+    if (!fb) return null;
+    const fg = fb.kind === "error" ? "red" : fb.kind === "success" ? "green" : "cyan";
+    return <span fg={fg}>{fb.message}</span>;
   };
 
   return (
     <box flexDirection="column" border borderStyle="rounded" paddingX={1} paddingY={0} minHeight={4}>
-      <text>
-        <strong>命令列</strong>
-        {feedback() ? " " : ""}
-        {feedback() ? <span fg={feedback()!.kind === "error" ? "red" : feedback()!.kind === "success" ? "green" : "cyan"}>{feedback()!.message}</span> : null}
-      </text>
-      <input
-        focused={true}
-        value={props.store.commandInput()}
-        placeholder={placeholder()}
-        width="100%"
-        onInput={(value) => props.store.setCommandInput(value)}
-        onSubmit={submit}
-      />
+      <Switch>
+        <Match when={props.uiMode() === "leader"}>
+          <text><strong>LEADER</strong></text>
+          <box flexDirection="row" gap={2}>
+            <For each={LEADER_BINDINGS}>
+              {(b) => (
+                <text dimmed={!!b.action && !props.availableActions().includes(b.action)}>
+                  {b.key}={b.label}
+                </text>
+              )}
+            </For>
+          </box>
+        </Match>
+        <Match when={props.uiMode() === "command"}>
+          <text>
+            <strong>命令列</strong>
+            {feedback() ? " " : ""}
+            {feedbackEl()}
+          </text>
+          <box flexDirection="row" gap={0}>
+            <text>:</text>
+            <input
+              focused={true}
+              value={props.store.commandInput()}
+              placeholder={placeholder()}
+              width="100%"
+              onInput={(value) => props.store.setCommandInput(value)}
+              onSubmit={submit}
+            />
+          </box>
+        </Match>
+        <Match when={true}>
+          <text>
+            <strong>命令列</strong>
+            {feedback() ? " " : ""}
+            {feedbackEl()}
+          </text>
+          <text>NORMAL  {"<SPC>"}=選單  :=命令列</text>
+        </Match>
+      </Switch>
     </box>
   );
 }

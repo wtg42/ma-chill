@@ -50,7 +50,7 @@ export function GameTable(props: GameTableProps): JSX.Element {
     renderer.clearSelection();
   });
 
-  useCommandKeys(store, {
+  const { uiMode, setUiMode } = useCommandKeys(store, {
     pageUp: () => requestScroll("page_up"),
     pageDown: () => requestScroll("page_down"),
     scrollToTop: () => requestScroll("top"),
@@ -71,7 +71,12 @@ export function GameTable(props: GameTableProps): JSX.Element {
           entries={store.eventLog()}
           scrollRequest={eventLogScrollRequest()}
         />
-        <CommandInput store={store} />
+        <CommandInput
+          store={store}
+          uiMode={uiMode}
+          availableActions={store.availableActions}
+          onExitCommand={() => setUiMode("normal")}
+        />
       </box>
     </Show>
   );
