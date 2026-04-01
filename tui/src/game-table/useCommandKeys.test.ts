@@ -9,6 +9,7 @@ import {
 
 const mockStore = {} as GameStateStore;
 
+// 建立鍵盤事件測試資料，讓各案例只關注要驗證的按鍵差異。
 function makeKey(name: string, extra: Record<string, unknown> = {}) {
   return {
     eventType: "press",
@@ -62,6 +63,7 @@ describe("handleLeaderKey", () => {
 });
 
 describe("mode transitions", () => {
+  // 建立可觀察模式切換的 handler，方便驗證不同按鍵路徑。
   function makeHandler(executeMock?: ReturnType<typeof mock>) {
     let mode: UiMode = "normal";
     const setMode = (m: UiMode) => {
@@ -86,6 +88,12 @@ describe("mode transitions", () => {
     expect(getMode()).toBe("leader");
   });
 
+  it("NORMAL: Ctrl+Space does not enter leader", () => {
+    const { handler, getMode } = makeHandler();
+    handler(makeKey("space", { ctrl: true }));
+    expect(getMode()).toBe("normal");
+  });
+
   it("NORMAL: : → command", () => {
     const { handler, getMode } = makeHandler();
     handler(makeKey(":"));
@@ -106,6 +114,15 @@ describe("mode transitions", () => {
     handler(makeKey("f")); // /pass
     expect(getMode()).toBe("normal");
     expect(execute).toHaveBeenCalledWith("/pass", mockStore);
+  });
+
+  it("LEADER: Ctrl+binding does not execute command", () => {
+    const { handler, getMode, execute } = makeHandler();
+    handler(makeKey("space")); // enter leader
+    expect(getMode()).toBe("leader");
+    handler(makeKey("f", { ctrl: true }));
+    expect(getMode()).toBe("normal");
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("LEADER: unrecognized key → normal without executing command", () => {

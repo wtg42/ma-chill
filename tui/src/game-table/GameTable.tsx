@@ -1,5 +1,5 @@
 import { JSX, Show, createSignal } from "solid-js";
-import { useRenderer, useSelectionHandler, useKeyboard } from "@opentui/solid";
+import { useRenderer, useSelectionHandler } from "@opentui/solid";
 import type { Selection } from "@opentui/core";
 import { useTerminalDimensions } from "./useTerminalDimensions";
 import { TooSmallWarning } from "./TooSmallWarning";
@@ -18,6 +18,7 @@ interface GameTableProps {
   store: GameStateStore;
 }
 
+// 組合遊戲主畫面的狀態列、事件流與命令列，並管理本地選取互動。
 export function GameTable(props: GameTableProps): JSX.Element {
   const { store } = props;
   const dimensions = useTerminalDimensions();
@@ -26,28 +27,19 @@ export function GameTable(props: GameTableProps): JSX.Element {
   let nextScrollToken = 1;
   let activeSelection: Selection | null = null;
 
+  // 將事件流捲動請求轉成遞增 token，確保子元件能辨識每次導覽。
   const requestScroll = (kind: EventLogScrollRequest["kind"]) => {
     setEventLogScrollRequest({ kind, token: nextScrollToken });
     nextScrollToken += 1;
   };
 
-  // Copy-on-select: copy text to clipboard when mouse is released with a selection
+  // 滑鼠放開且仍有 selection 時，依 copy-on-select 規格自動複製文字。
   useSelectionHandler((selection) => {
     activeSelection = selection.isActive ? selection : null;
     if (!selection.isDragging && selection.isActive) {
       const text = selection.getSelectedText();
       if (text) copyToClipboard(text, renderer);
     }
-  });
-
-  // Ctrl+C: copy selection if active, otherwise fall through to default exit
-  useKeyboard((key) => {
-    if (key.eventType !== "press" || !key.ctrl || key.name !== "c") return;
-    if (!activeSelection?.isActive) return;
-    key.preventDefault();
-    const text = activeSelection.getSelectedText();
-    if (text) copyToClipboard(text, renderer);
-    renderer.clearSelection();
   });
 
   const { uiMode, setUiMode } = useCommandKeys(store, {
