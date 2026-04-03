@@ -1,4 +1,4 @@
-import { JSX, Show, createSignal } from "solid-js";
+import { JSX, Show, createSignal, onCleanup } from "solid-js";
 import { useRenderer, useSelectionHandler } from "@opentui/solid";
 import type { Selection } from "@opentui/core";
 import { useTerminalDimensions } from "./useTerminalDimensions";
@@ -24,8 +24,20 @@ export function GameTable(props: GameTableProps): JSX.Element {
   const dimensions = useTerminalDimensions();
   const renderer = useRenderer();
   const [eventLogScrollRequest, setEventLogScrollRequest] = createSignal<EventLogScrollRequest | null>(null);
+  const [toast, setToast] = createSignal<boolean>(false);
   let nextScrollToken = 1;
   let activeSelection: Selection | null = null;
+  let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+  onCleanup(() => {
+    if (toastTimer !== null) clearTimeout(toastTimer);
+  });
+
+  function showToast(): void {
+    if (toastTimer !== null) clearTimeout(toastTimer);
+    setToast(true);
+    toastTimer = setTimeout(() => setToast(false), 1500);
+  }
 
   // 將事件流捲動請求轉成遞增 token，確保子元件能辨識每次導覽。
   const requestScroll = (kind: EventLogScrollRequest["kind"]) => {
@@ -38,7 +50,7 @@ export function GameTable(props: GameTableProps): JSX.Element {
     activeSelection = selection.isActive ? selection : null;
     if (!selection.isDragging && selection.isActive) {
       const text = selection.getSelectedText();
-      if (text) copyToClipboard(text, renderer);
+      if (text) copyToClipboard(text, renderer).then((ok) => { if (ok) showToast(); });
     }
   });
 
@@ -69,6 +81,11 @@ export function GameTable(props: GameTableProps): JSX.Element {
           availableActions={store.availableActions}
           onExitCommand={() => setUiMode("normal")}
         />
+        <Show when={toast()}>
+          <box position="absolute" zIndex={100} right={2} bottom={7} borderStyle="rounded" paddingX={1} paddingY={0}>
+            <text>已複製至剪貼簿</text>
+          </box>
+        </Show>
       </box>
     </Show>
   );
