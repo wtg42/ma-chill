@@ -255,10 +255,12 @@ export function useGameState() {
     setCurrentPlayerId(msg.player_id);
     const hints = getAvailableCommandHints(msg.available_actions);
     setAvailableCommandHints(hints);
-    appendEvent(
-      "system",
-      `${playerLabel(msg.player_id)}可用：${hints.join(" ")}`,
-    );
+    if (msg.player_id === 0) {
+      appendEvent(
+        "system",
+        `${playerLabel(msg.player_id)}可用：${hints.join(" ")}`,
+      );
+    }
   }
 
   function applyGameOver(msg: ZigGameOverMessage): void {
