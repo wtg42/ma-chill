@@ -55,6 +55,13 @@
 - **WHEN** TUI 收到 `turn_changed.available_actions = ["pon", "win"]`
 - **THEN** shell 狀態列僅將對應的遊戲命令顯示為可執行，其餘遊戲動作顯示為不可用或不提示
 
+### Requirement: NORMAL 模式按鍵提示文字不得含 HTML 跳脫字元
+系統 SHALL 在 NORMAL 模式的提示列中，使用不含 `<` 或 `>` 的按鍵標示格式，以避免 OpenTUI text 節點將其轉為 HTML entity（如 `&lt;` 和 `&gt;`）而在終端機上錯誤顯示。按鍵名稱 SHALL 以方括號表示，例如 `[SPC]`。
+
+#### Scenario: NORMAL 模式顯示鍵盤提示
+- **WHEN** TUI 處於 NORMAL 模式（非 leader、非 command 模式）
+- **THEN** 底部提示列顯示 `NORMAL  [SPC]=選單  :=命令列`，不含任何 HTML entity
+
 ### Requirement: `/hand` 本地查詢命令
 系統 SHALL 提供 `/hand` 作為純本地查詢命令。執行 `/hand` 時 MUST 不送出任何 IPC 訊息，而是直接使用目前 TUI state 將玩家手牌摘要逐行追加到 shell 事件流；輸出 MUST 使用既有 ASCII 牌面渲染，而不是純文字牌名，且不得顯示 `tile_id`。
 

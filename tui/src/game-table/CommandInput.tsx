@@ -74,7 +74,7 @@ export function CommandInput(props: Props): JSX.Element {
             {feedback() ? " " : ""}
             {feedbackEl()}
           </text>
-          <text>NORMAL  {"<SPC>"}=選單  :=命令列</text>
+          <text>NORMAL  [SPC]=選單  :=命令列</text>
         </Match>
       </Switch>
     </box>
