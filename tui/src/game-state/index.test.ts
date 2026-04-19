@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { useGameState, type ZigGameState, type ZigInitMessage, type ZigStateUpdateMessage } from "./index";
+import { useGameState, type ZigGameState, type ZigInitMessage, type ZigStateUpdateMessage, type ZigTurnChangedMessage } from "./index";
 import { buildTaiwanMahjongCatalog } from "../tiles";
 import type { CanonicalTile } from "../tiles/types";
 import type { ZigTileEntry } from "../tiles/catalog-map";
@@ -58,6 +58,35 @@ describe("useGameState applyStateUpdate", () => {
       "system:已連線至 Zig core。輸入 /help 查看可用指令。",
       "game:玩家 2摸牌",
     ]);
+  });
+});
+
+describe("useGameState applyTurnChanged", () => {
+  it("stores discard reaction context and appends player-facing prompt", () => {
+    const store = useGameState();
+    store.applyInit(createInitMessage(createState([tileId("characters", 1)], null)));
+
+    const msg: ZigTurnChangedMessage = {
+      type: "turn_changed",
+      player_id: 0,
+      phase_kind: "discard_reaction",
+      available_actions: ["chi", "pass"],
+      discarded_tile_id: tileId("characters", 3),
+      discarder_player_id: 2,
+      priority_group: "chi",
+      chi_options: [{ claim_tile_ids: [tileId("characters", 1), tileId("characters", 2)] }],
+    };
+
+    store.applyTurnChanged(msg);
+
+    expect(store.phaseKind()).toBe("discard_reaction");
+    expect(store.claimContext()).toEqual({
+      discardedTileId: tileId("characters", 3),
+      discarderPlayerId: 2,
+      priorityGroup: "chi",
+      chiOptions: [{ claim_tile_ids: [tileId("characters", 1), tileId("characters", 2)] }],
+    });
+    expect(store.eventLog().at(-1)?.message).toContain("玩家 3打出 三萬");
   });
 });
 

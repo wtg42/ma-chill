@@ -64,6 +64,63 @@ describe("executeCommand", () => {
     expect(result.ok).toBe(true);
     expect(result.message).toContain("/hand - 顯示目前手牌摘要");
   });
+
+  it("requires explicit chi option when multiple choices exist", () => {
+    const sendAction = mock(() => {});
+    const store = createStoreStub({
+      availableActions: mock(() => ["chi", "pass"]),
+      phaseKind: mock(() => "discard_reaction"),
+      claimContext: mock(() => ({
+        discardedTileId: 10,
+        discarderPlayerId: 1,
+        priorityGroup: "chi",
+        chiOptions: [
+          { claim_tile_ids: [1, 2] },
+          { claim_tile_ids: [2, 4] },
+        ],
+      })),
+    });
+
+    const result = executeCommand("/chi", store, {}, { sendAction });
+
+    expect(result).toEqual({ ok: false, message: "此刻可吃 2 組，請輸入 /chi <index>。" });
+    expect(sendAction).not.toHaveBeenCalled();
+  });
+
+  it("sends selected chi option ids", () => {
+    const sendAction = mock(() => {});
+    const store = createStoreStub({
+      availableActions: mock(() => ["chi", "pass"]),
+      phaseKind: mock(() => "discard_reaction"),
+      claimContext: mock(() => ({
+        discardedTileId: 10,
+        discarderPlayerId: 1,
+        priorityGroup: "chi",
+        chiOptions: [
+          { claim_tile_ids: [1, 2] },
+          { claim_tile_ids: [2, 4] },
+        ],
+      })),
+    });
+
+    const result = executeCommand("/chi 2", store, {}, { sendAction });
+
+    expect(result.ok).toBe(true);
+    expect(sendAction).toHaveBeenCalledWith("chi", undefined, [2, 4]);
+  });
+
+  it("rejects /pass outside discard reaction phase", () => {
+    const sendAction = mock(() => {});
+    const store = createStoreStub({
+      availableActions: mock(() => ["pass"]),
+      phaseKind: mock(() => "self_turn"),
+    });
+
+    const result = executeCommand("/pass", store, {}, { sendAction });
+
+    expect(result).toEqual({ ok: false, message: "/pass 只能在回應視窗使用。" });
+    expect(sendAction).not.toHaveBeenCalled();
+  });
 });
 
 function createStoreStub(overrides: Partial<GameStateStoreStub> = {}): GameStateStoreStub {
@@ -75,6 +132,13 @@ function createStoreStub(overrides: Partial<GameStateStoreStub> = {}): GameState
     commandFeedback: mock(() => null),
     eventLog: mock(() => []),
     availableCommandHints: mock(() => ["/help", "/status", "/hand"]),
+    phaseKind: mock(() => "self_turn"),
+    claimContext: mock(() => ({
+      discardedTileId: null,
+      discarderPlayerId: null,
+      priorityGroup: "none",
+      chiOptions: [],
+    })),
     gameOverMsg: mock(() => null),
     commandInput: mock(() => ""),
     passTimeoutSeconds: mock(() => 5),
@@ -131,6 +195,8 @@ type GameStateStoreStub = Pick<
   | "commandFeedback"
   | "eventLog"
   | "availableCommandHints"
+  | "phaseKind"
+  | "claimContext"
   | "applyInit"
   | "applyStateUpdate"
   | "applyTurnChanged"
