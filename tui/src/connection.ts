@@ -7,11 +7,15 @@ type ZigMessage = ZigInitMessage | ZigStateUpdateMessage | ZigTurnChangedMessage
 
 let socket: { write: (data: string) => void } | null = null;
 
-export function sendAction(action: string, tileId?: number): void {
+/// 將結構化玩家動作送往 Zig core，並保留擴充 claim payload 的空間。
+export function sendAction(action: string, tileId?: number, claimTileIds?: number[]): void {
   if (!socket) return;
   const msg: Record<string, unknown> = { type: "player_action", action };
   if (tileId !== undefined) {
     msg.tile_id = tileId;
+  }
+  if (claimTileIds !== undefined) {
+    msg.claim_tile_ids = claimTileIds;
   }
   socket.write(JSON.stringify(msg) + "\n");
 }

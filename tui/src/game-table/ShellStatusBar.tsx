@@ -18,6 +18,16 @@ export function ShellStatusBar(props: Props): JSX.Element {
   const state = () => props.store.gameState();
   const available = () => props.store.availableCommandHints();
   const currentPlayer = () => PLAYER_NAMES[props.store.currentPlayerId()] ?? `玩家 ${props.store.currentPlayerId() + 1}`;
+  const phaseLabel = () => {
+    if (props.store.phaseKind() === "discard_reaction") {
+      const ctx = props.store.claimContext();
+      const discarder = ctx.discarderPlayerId != null
+        ? PLAYER_NAMES[ctx.discarderPlayerId] ?? `玩家 ${ctx.discarderPlayerId + 1}`
+        : "他家";
+      return `回應視窗 ${discarder}`;
+    }
+    return "自己回合";
+  };
 
   return (
     <box flexDirection="column" border borderStyle="rounded" paddingX={1} paddingY={0} minHeight={4}>
@@ -26,6 +36,7 @@ export function ShellStatusBar(props: Props): JSX.Element {
         {state() ? `  ${ROUND_WIND_ZH[state()!.round_wind] ?? state()!.round_wind}風 ${state()!.round_number} 局` : "  等待初始化"}
         {state() ? `  牌山 ${state()!.wall_count}` : ""}
         {state() ? `  輪到 ${currentPlayer()}` : ""}
+        {state() ? `  ${phaseLabel()}` : ""}
       </text>
       <text>
         <strong>分數</strong>

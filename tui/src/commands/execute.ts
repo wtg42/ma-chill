@@ -15,7 +15,7 @@ interface CommandResult {
 }
 
 interface CommandDeps {
-  sendAction: (action: string, tileId?: number) => void;
+  sendAction: (action: string, tileId?: number, claimTileIds?: number[]) => void;
 }
 
 const ROUND_WIND_ZH: Record<string, string> = {
@@ -113,7 +113,20 @@ function executeActionCommand(action: string, args: string[], store: GameStateSt
     return { ok: false, message };
   }
 
+  if (action === "pass" && store.phaseKind() !== "discard_reaction") {
+    const message = "/pass 只能在回應視窗使用。";
+    store.setCommandFeedback("error", message);
+    store.appendEvent("error", message);
+    return { ok: false, message };
+  }
+
   if (action === "discard") {
+    if (store.phaseKind() !== "self_turn") {
+      const message = "/discard 只能在自己的回合使用。";
+      store.setCommandFeedback("error", message);
+      store.appendEvent("error", message);
+      return { ok: false, message };
+    }
     const resolved = resolveDiscardTile(args, store);
     if (!resolved.ok) {
       store.setCommandFeedback("error", resolved.message);
@@ -128,12 +141,68 @@ function executeActionCommand(action: string, args: string[], store: GameStateSt
     return { ok: true, message };
   }
 
+  if (action === "chi") {
+    if (store.phaseKind() !== "discard_reaction") {
+      const message = "/chi 只能在回應視窗使用。";
+      store.setCommandFeedback("error", message);
+      store.appendEvent("error", message);
+      return { ok: false, message };
+    }
+
+    const resolved = resolveChiOption(args, store);
+    if (!resolved.ok) {
+      store.setCommandFeedback("error", resolved.message);
+      store.appendEvent("error", resolved.message);
+      return resolved;
+    }
+    store.clearTurnPrompt();
+    deps.sendAction("chi", undefined, resolved.claimTileIds);
+    const message = `已送出 /chi ${resolved.display}`;
+    store.setCommandFeedback("success", message);
+    store.appendEvent("system", message);
+    return { ok: true, message };
+  }
+
   store.clearTurnPrompt();
   deps.sendAction(action);
   const message = `已送出 /${action}`;
   store.setCommandFeedback("success", message);
   store.appendEvent("system", message);
   return { ok: true, message };
+}
+
+function resolveChiOption(args: string[], store: GameStateStore):
+  | { ok: true; claimTileIds: number[]; display: string; message: string }
+  | { ok: false; message: string } {
+  const chiOptions = store.claimContext().chiOptions;
+  if (chiOptions.length === 0) {
+    return { ok: false, message: "目前沒有可用的吃牌選項。" };
+  }
+
+  if (chiOptions.length === 1) {
+    return {
+      ok: true,
+      claimTileIds: [...chiOptions[0].claim_tile_ids],
+      display: "1",
+      message: "",
+    };
+  }
+
+  const token = args[0]?.trim();
+  if (!token) {
+    return { ok: false, message: `此刻可吃 ${chiOptions.length} 組，請輸入 /chi <index>。` };
+  }
+  const index = Number(token);
+  if (!Number.isInteger(index) || index < 1 || index > chiOptions.length) {
+    return { ok: false, message: `吃牌選項必須介於 1 到 ${chiOptions.length}。` };
+  }
+
+  return {
+    ok: true,
+    claimTileIds: [...chiOptions[index - 1].claim_tile_ids],
+    display: String(index),
+    message: "",
+  };
 }
 
 function resolveDiscardTile(args: string[], store: GameStateStore):

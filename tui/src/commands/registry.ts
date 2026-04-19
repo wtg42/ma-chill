@@ -38,8 +38,8 @@ const COMMANDS: CommandDefinition[] = [
     name: "chi",
     kind: "action",
     action: "chi",
-    usage: "/chi",
-    description: "吃牌",
+    usage: "/chi [index]",
+    description: "吃牌；若有多組可吃，需指定選項編號",
   },
   {
     name: "pon",

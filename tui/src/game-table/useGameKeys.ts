@@ -100,6 +100,11 @@ export function useGameKeys(
   const CLAIM_ACTIONS = new Set(Object.values(CLAIM_KEYS));
 
   createEffect(() => {
+    if (store.phaseKind() !== "discard_reaction") {
+      clearPassTimer();
+      return;
+    }
+
     const actions = store.availableActions();
     clearPassTimer();
 

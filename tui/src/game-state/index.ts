@@ -47,10 +47,29 @@ export interface ZigStateUpdateMessage {
   state: ZigGameState;
 }
 
+export type ZigPhaseKind = "self_turn" | "discard_reaction";
+export type ZigPriorityGroup = "none" | "win" | "meld" | "chi";
+
+export interface ZigChiOption {
+  claim_tile_ids: number[];
+}
+
 export interface ZigTurnChangedMessage {
   type: "turn_changed";
   player_id: number;
+  phase_kind: ZigPhaseKind;
   available_actions: string[];
+  discarded_tile_id?: number | null;
+  discarder_player_id?: number | null;
+  priority_group?: ZigPriorityGroup;
+  chi_options?: ZigChiOption[];
+}
+
+export interface ClaimPromptContext {
+  discardedTileId: number | null;
+  discarderPlayerId: number | null;
+  priorityGroup: ZigPriorityGroup;
+  chiOptions: ZigChiOption[];
 }
 
 export interface ZigScoringLine {
@@ -183,6 +202,19 @@ function buildHandEntries(
   return entries;
 }
 
+function describeTurnPrompt(
+  msg: ZigTurnChangedMessage,
+  hints: string[],
+  tileCatalog: Map<number, CanonicalTile>,
+): string {
+  if (msg.phase_kind === "discard_reaction") {
+    const tile = msg.discarded_tile_id != null ? tileCatalog.get(msg.discarded_tile_id) : undefined;
+    const tileLabel = tile ? formatTileLabel(tile) : `tile ${msg.discarded_tile_id ?? "?"}`;
+    return `${playerLabel(msg.discarder_player_id ?? -1)}打出 ${tileLabel}，你可用：${hints.join(" ")}`;
+  }
+  return `${playerLabel(msg.player_id)}可用：${hints.join(" ")}`;
+}
+
 // ---- useGameState hook ----
 
 export function useGameState() {
@@ -196,6 +228,13 @@ export function useGameState() {
   const [commandFeedback, setCommandFeedbackState] = createSignal<CommandFeedback | null>(null);
   const [eventLog, setEventLog] = createSignal<EventLogEntry[]>([]);
   const [availableCommandHints, setAvailableCommandHints] = createSignal<string[]>(getAlwaysAvailableCommandHints());
+  const [phaseKind, setPhaseKind] = createSignal<ZigPhaseKind>("self_turn");
+  const [claimContext, setClaimContext] = createSignal<ClaimPromptContext>({
+    discardedTileId: null,
+    discarderPlayerId: null,
+    priorityGroup: "none",
+    chiOptions: [],
+  });
   let nextEventId = 1;
 
   function appendEvent(kind: EventLogEntry["kind"], message: string): void {
@@ -222,6 +261,13 @@ export function useGameState() {
     setCurrentPlayerId(msg.state.current_player_id);
     setPassTimeoutSeconds(msg.pass_timeout_seconds);
     setAvailableCommandHints(getAlwaysAvailableCommandHints());
+    setPhaseKind("self_turn");
+    setClaimContext({
+      discardedTileId: null,
+      discarderPlayerId: null,
+      priorityGroup: "none",
+      chiOptions: [],
+    });
     appendEvent("system", "已連線至 Zig core。輸入 /help 查看可用指令。");
   }
 
@@ -232,6 +278,13 @@ export function useGameState() {
     setAvailableActions([]);
     setCurrentPlayerId(msg.state.current_player_id);
     setAvailableCommandHints(getAlwaysAvailableCommandHints());
+    setPhaseKind("self_turn");
+    setClaimContext({
+      discardedTileId: null,
+      discarderPlayerId: null,
+      priorityGroup: "none",
+      chiOptions: [],
+    });
 
     const messages = diffStateMessages(previousState, msg.state, catalog);
     for (const message of messages) {
@@ -253,13 +306,17 @@ export function useGameState() {
   function applyTurnChanged(msg: ZigTurnChangedMessage): void {
     setAvailableActions(msg.available_actions);
     setCurrentPlayerId(msg.player_id);
+    setPhaseKind(msg.phase_kind);
+    setClaimContext({
+      discardedTileId: msg.discarded_tile_id ?? null,
+      discarderPlayerId: msg.discarder_player_id ?? null,
+      priorityGroup: msg.priority_group ?? "none",
+      chiOptions: msg.chi_options ?? [],
+    });
     const hints = getAvailableCommandHints(msg.available_actions);
     setAvailableCommandHints(hints);
     if (msg.player_id === 0) {
-      appendEvent(
-        "system",
-        `${playerLabel(msg.player_id)}可用：${hints.join(" ")}`,
-      );
+      appendEvent("system", describeTurnPrompt(msg, hints, tileCatalog()));
     }
   }
 
@@ -267,6 +324,13 @@ export function useGameState() {
     setGameOverMsg(msg);
     setAvailableActions([]);
     setAvailableCommandHints(getAlwaysAvailableCommandHints());
+    setPhaseKind("self_turn");
+    setClaimContext({
+      discardedTileId: null,
+      discarderPlayerId: null,
+      priorityGroup: "none",
+      chiOptions: [],
+    });
     if (msg.winner_id === null) {
       appendEvent("game", "本局流局。" );
     } else {
@@ -277,6 +341,13 @@ export function useGameState() {
   function clearTurnPrompt(): void {
     setAvailableActions([]);
     setAvailableCommandHints(getAlwaysAvailableCommandHints());
+    setPhaseKind("self_turn");
+    setClaimContext({
+      discardedTileId: null,
+      discarderPlayerId: null,
+      priorityGroup: "none",
+      chiOptions: [],
+    });
   }
 
   const handWithIds = createMemo<HandEntry[]>(() => {
@@ -298,6 +369,8 @@ export function useGameState() {
     commandFeedback,
     eventLog,
     availableCommandHints,
+    phaseKind,
+    claimContext,
     applyInit,
     applyStateUpdate,
     applyTurnChanged,

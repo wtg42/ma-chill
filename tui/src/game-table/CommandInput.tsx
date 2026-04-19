@@ -15,6 +15,9 @@ interface Props {
 export function CommandInput(props: Props): JSX.Element {
   const feedback = () => props.store.commandFeedback();
   const placeholder = createMemo(() => {
+    if (props.store.phaseKind() === "discard_reaction") {
+      return props.store.claimContext().chiOptions.length > 1 ? "/chi <index> /pass" : "/chi /pon /kong /win /pass";
+    }
     const hints = props.store.availableCommandHints();
     if (hints.length === 0) {
       return "/help";
@@ -74,7 +77,11 @@ export function CommandInput(props: Props): JSX.Element {
             {feedback() ? " " : ""}
             {feedbackEl()}
           </text>
-          <text>NORMAL  [SPC]=選單  :=命令列</text>
+          <text>
+            {props.store.phaseKind() === "discard_reaction"
+              ? "NORMAL  目前在回應視窗  [SPC]=選單  :=命令列"
+              : "NORMAL  目前在自己回合  [SPC]=選單  :=命令列"}
+          </text>
         </Match>
       </Switch>
     </box>

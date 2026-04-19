@@ -136,6 +136,11 @@ export function useCommandKeys(
   useKeyboard(handler);
 
   createEffect(() => {
+    if (store.phaseKind() !== "discard_reaction") {
+      clearPassTimer();
+      return;
+    }
+
     const actions = store.availableActions();
     clearPassTimer();
 
