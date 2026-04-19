@@ -19,28 +19,32 @@ pub const presets = struct {
     pub const balanced = AiPersonality{ .aggression = 0.5, .meld_tendency = 0.5, .defense = 0.5, .score_sensitive = 0.5, .wall_sensitive = 0.5 };
 };
 
-pub fn decide(game_state: *const state.GameState, player_id: u8, personality: AiPersonality, available_actions: []const protocol.ActionType) protocol.PlayerActionMessage {
-    if (containsAction(available_actions, .win) and shouldTakeWin(game_state, player_id, personality)) {
+/// 依 turn_changed prompt 決定 AI 動作，必要時會帶上吃牌所需的 claim_tile_ids。
+pub fn decide(game_state: *const state.GameState, turn_changed: protocol.TurnChangedMessage, personality: AiPersonality) protocol.PlayerActionMessage {
+    if (containsAction(turn_changed.available_actions, .win) and shouldTakeWin(game_state, turn_changed.player_id, personality)) {
         return .{ .action = .win, .tile_id = null };
     }
 
-    if (containsAction(available_actions, .kong) and personality.meld_tendency >= 0.7) {
-        if (findClosedKongTile(game_state.players[player_id].hand.items)) |tile_id| {
+    if (containsAction(turn_changed.available_actions, .kong) and personality.meld_tendency >= 0.7) {
+        if (findClosedKongTile(game_state.players[turn_changed.player_id].hand.items)) |tile_id| {
             return .{ .action = .kong, .tile_id = tile_id };
         }
     }
 
-    if (containsAction(available_actions, .pon) and personality.meld_tendency >= 0.65) {
+    if (containsAction(turn_changed.available_actions, .pon) and personality.meld_tendency >= 0.65) {
         return .{ .action = .pon, .tile_id = null };
     }
-    if (containsAction(available_actions, .chi) and personality.meld_tendency >= 0.55) {
+    if (containsAction(turn_changed.available_actions, .chi) and personality.meld_tendency >= 0.55) {
+        if (turn_changed.chi_options.len > 0) {
+            return .{ .action = .chi, .tile_id = null, .claim_tile_ids = &turn_changed.chi_options[0].claim_tile_ids };
+        }
         return .{ .action = .chi, .tile_id = null };
     }
-    if (containsAction(available_actions, .pass) and !containsAction(available_actions, .discard)) {
+    if (containsAction(turn_changed.available_actions, .pass) and !containsAction(turn_changed.available_actions, .discard)) {
         return .{ .action = .pass, .tile_id = null };
     }
 
-    return .{ .action = .discard, .tile_id = chooseDiscardTile(game_state, player_id, personality) };
+    return .{ .action = .discard, .tile_id = chooseDiscardTile(game_state, turn_changed.player_id, personality) };
 }
 
 fn chooseDiscardTile(game_state: *const state.GameState, player_id: u8, personality: AiPersonality) u8 {
@@ -142,7 +146,11 @@ test "decide wins immediately with conservative preset" {
     };
     try game_state.players[1].hand.appendSlice(allocator, &hand);
 
-    const action = decide(&game_state, 1, presets.conservative, &.{ .win, .discard });
+    const action = decide(&game_state, .{
+        .player_id = 1,
+        .phase_kind = .self_turn,
+        .available_actions = &.{ .win, .discard },
+    }, presets.conservative);
     try std.testing.expectEqual(protocol.ActionType.win, action.action);
 }
 
@@ -153,7 +161,11 @@ test "decide chooses a discard when no claim is available" {
     defer game_state.deinit();
 
     try game_state.players[2].hand.appendSlice(allocator, catalog[0..17]);
-    const action = decide(&game_state, 2, presets.balanced, &.{.discard});
+    const action = decide(&game_state, .{
+        .player_id = 2,
+        .phase_kind = .self_turn,
+        .available_actions = &.{.discard},
+    }, presets.balanced);
     try std.testing.expectEqual(protocol.ActionType.discard, action.action);
     try std.testing.expect(action.tile_id != null);
 }

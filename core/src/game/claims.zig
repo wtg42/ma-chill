@@ -14,6 +14,7 @@ pub const ClaimAction = enum {
 pub const ClaimChoice = struct {
     player_id: u8,
     action: ClaimAction,
+    claim_tile_ids: ?[2]u8 = null,
 };
 
 pub const ClaimTurn = struct {
@@ -45,7 +46,7 @@ pub fn resolve(game_state: *state.GameState, discarded_tile_id: u8, choices: []c
         .pass => .none,
         .win => .{ .win = selected.player_id },
         .chi => blk: {
-            try transitions.applyChiClaim(game_state, selected.player_id, discarded_tile_id);
+            try transitions.applyChiClaim(game_state, selected.player_id, discarded_tile_id, selected.claim_tile_ids);
             break :blk .{ .claim_turn = .{ .player_id = selected.player_id, .pending_draw = false } };
         },
         .pon => blk: {
@@ -58,6 +59,13 @@ pub fn resolve(game_state: *state.GameState, discarded_tile_id: u8, choices: []c
             break :blk .{ .claim_turn = .{ .player_id = selected.player_id, .pending_draw = false } };
         },
     };
+}
+
+/// 將 player_action 附帶的 claim_tile_ids 正規化成固定長度的吃牌選項。
+pub fn parseClaimTileIds(message: protocol.PlayerActionMessage) !?[2]u8 {
+    const claim_tile_ids = message.claim_tile_ids orelse return null;
+    if (claim_tile_ids.len != 2) return error.InvalidTile;
+    return .{ claim_tile_ids[0], claim_tile_ids[1] };
 }
 
 pub fn prioritizeChoices(choices: []const ?ClaimChoice) ?ClaimChoice {
@@ -123,4 +131,10 @@ test "resolve open kong keeps claimer turn after supplement draw" {
     try std.testing.expectEqual(@as(u8, 1), game_state.current_player_id);
     try std.testing.expectEqual(@as(usize, 1), game_state.players[1].melds.items.len);
     try std.testing.expectEqual(@as(usize, 1), game_state.players[1].hand.items.len);
+}
+
+test "parseClaimTileIds accepts exactly two ids" {
+    const claim_tile_ids = [_]u8{ 3, 4 };
+    const parsed = try parseClaimTileIds(.{ .action = .chi, .tile_id = null, .claim_tile_ids = &claim_tile_ids });
+    try std.testing.expectEqualSlices(u8, &claim_tile_ids, &parsed.?);
 }

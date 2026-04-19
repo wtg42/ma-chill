@@ -13,6 +13,22 @@ pub const ActionType = enum {
     pass,
 };
 
+pub const PhaseKind = enum {
+    self_turn,
+    discard_reaction,
+};
+
+pub const PriorityGroup = enum {
+    none,
+    win,
+    meld,
+    chi,
+};
+
+pub const ChiOption = struct {
+    claim_tile_ids: [2]u8,
+};
+
 pub const InitMessage = struct {
     tile_catalog: []tile.Tile,
     state_json: []const u8,
@@ -25,7 +41,12 @@ pub const StateUpdateMessage = struct {
 
 pub const TurnChangedMessage = struct {
     player_id: u8,
+    phase_kind: PhaseKind,
     available_actions: []ActionType,
+    discarded_tile_id: ?u8 = null,
+    discarder_player_id: ?u8 = null,
+    priority_group: PriorityGroup = .none,
+    chi_options: []const ChiOption = &.{},
 };
 
 pub const GameOverMessage = struct {
@@ -37,6 +58,7 @@ pub const GameOverMessage = struct {
 pub const PlayerActionMessage = struct {
     action: ActionType,
     tile_id: ?u8,
+    claim_tile_ids: ?[]const u8 = null,
 };
 
 pub const PlayerReadyMessage = struct {};
@@ -56,12 +78,19 @@ pub const Message = union(enum) {
                 allocator.free(payload.state_json);
             },
             .state_update => |payload| allocator.free(payload.state_json),
-            .turn_changed => |payload| allocator.free(payload.available_actions),
-            .game_over, .player_action, .player_ready => {},
+            .turn_changed => |payload| {
+                allocator.free(payload.available_actions);
+                if (payload.chi_options.len > 0) allocator.free(payload.chi_options);
+            },
+            .game_over, .player_ready => {},
+            .player_action => |payload| {
+                if (payload.claim_tile_ids) |claim_tile_ids| allocator.free(claim_tile_ids);
+            },
         }
     }
 };
 
+/// 將協定訊息序列化為 JSONL，供 UDS 雙向通訊使用。
 pub fn sendMessage(writer: anytype, message: Message) !void {
     switch (message) {
         .init => |payload| {
@@ -81,8 +110,24 @@ pub fn sendMessage(writer: anytype, message: Message) !void {
         .turn_changed => |payload| {
             try writer.writeAll("{\"type\":\"turn_changed\",\"player_id\":");
             try writer.print("{}", .{payload.player_id});
+            try writer.writeAll(",\"phase_kind\":");
+            try writeStringValue(writer, @tagName(payload.phase_kind));
             try writer.writeAll(",\"available_actions\":");
             try writeActionList(writer, payload.available_actions);
+            if (payload.discarded_tile_id) |discarded_tile_id| {
+                try writer.writeAll(",\"discarded_tile_id\":");
+                try writer.print("{}", .{discarded_tile_id});
+            }
+            if (payload.discarder_player_id) |discarder_player_id| {
+                try writer.writeAll(",\"discarder_player_id\":");
+                try writer.print("{}", .{discarder_player_id});
+            }
+            try writer.writeAll(",\"priority_group\":");
+            try writeStringValue(writer, @tagName(payload.priority_group));
+            if (payload.chi_options.len > 0) {
+                try writer.writeAll(",\"chi_options\":");
+                try writeChiOptionList(writer, payload.chi_options);
+            }
             try writer.writeAll("}\n");
         },
         .game_over => |payload| {
@@ -129,6 +174,10 @@ pub fn sendMessage(writer: anytype, message: Message) !void {
                 try writer.writeAll(",\"tile_id\":");
                 try writer.print("{}", .{tile_id});
             }
+            if (payload.claim_tile_ids) |claim_tile_ids| {
+                try writer.writeAll(",\"claim_tile_ids\":");
+                try writeU8List(writer, claim_tile_ids);
+            }
             try writer.writeAll("}\n");
         },
         .player_ready => {
@@ -137,6 +186,7 @@ pub fn sendMessage(writer: anytype, message: Message) !void {
     }
 }
 
+/// 將單行 JSON 協定訊息解析回結構化 Message，供 core 與 TUI 共用。
 pub fn parseMessage(allocator: std.mem.Allocator, input: []const u8) !Message {
     const trimmed = std.mem.trimEnd(u8, input, "\r\n");
     var parsed = try std.json.parseFromSlice(std.json.Value, allocator, trimmed, .{});
@@ -172,9 +222,15 @@ pub fn parseMessage(allocator: std.mem.Allocator, input: []const u8) !Message {
 
     if (std.mem.eql(u8, type_name, "turn_changed")) {
         const action_values = object.get("available_actions") orelse return error.InvalidMessage;
+        const chi_option_values = object.get("chi_options");
         return .{ .turn_changed = .{
             .player_id = try getIntField(object, "player_id", u8),
+            .phase_kind = try parseEnumField(object, "phase_kind", PhaseKind),
             .available_actions = try parseActionList(allocator, action_values),
+            .discarded_tile_id = try parseOptionalIntField(object, "discarded_tile_id", u8),
+            .discarder_player_id = try parseOptionalIntField(object, "discarder_player_id", u8),
+            .priority_group = try parseOptionalEnumField(object, "priority_group", PriorityGroup) orelse .none,
+            .chi_options = if (chi_option_values) |value| try parseChiOptionList(allocator, value) else &.{},
         } };
     }
 
@@ -192,6 +248,7 @@ pub fn parseMessage(allocator: std.mem.Allocator, input: []const u8) !Message {
         return .{ .player_action = .{
             .action = std.meta.stringToEnum(ActionType, action_name) orelse return error.InvalidMessage,
             .tile_id = try parseOptionalIntField(object, "tile_id", u8),
+            .claim_tile_ids = try parseOptionalU8List(allocator, object, "claim_tile_ids"),
         } };
     }
 
@@ -228,6 +285,32 @@ fn writeActionList(writer: anytype, actions: []const ActionType) !void {
             try writer.writeByte(',');
         }
         try writeStringValue(writer, @tagName(action));
+    }
+    try writer.writeByte(']');
+}
+
+/// 將吃牌可選組合序列化成 JSON 陣列，供 TUI 顯示具體選項。
+fn writeChiOptionList(writer: anytype, chi_options: []const ChiOption) !void {
+    try writer.writeByte('[');
+    for (chi_options, 0..) |chi_option, index| {
+        if (index > 0) {
+            try writer.writeByte(',');
+        }
+        try writer.writeAll("{\"claim_tile_ids\":");
+        try writeU8List(writer, &chi_option.claim_tile_ids);
+        try writer.writeByte('}');
+    }
+    try writer.writeByte(']');
+}
+
+/// 將 u8 陣列序列化成 JSON 陣列，供 tile id 類欄位共用。
+fn writeU8List(writer: anytype, values: []const u8) !void {
+    try writer.writeByte('[');
+    for (values, 0..) |value, index| {
+        if (index > 0) {
+            try writer.writeByte(',');
+        }
+        try writer.print("{}", .{value});
     }
     try writer.writeByte(']');
 }
@@ -281,6 +364,41 @@ fn parseActionList(allocator: std.mem.Allocator, value: std.json.Value) ![]Actio
     return actions;
 }
 
+/// 解析 turn_changed 中的 chi_options，保留每組吃牌會消耗的兩張 tile id。
+fn parseChiOptionList(allocator: std.mem.Allocator, value: std.json.Value) ![]ChiOption {
+    if (value != .array) {
+        return error.InvalidMessage;
+    }
+
+    const chi_options = try allocator.alloc(ChiOption, value.array.items.len);
+    errdefer allocator.free(chi_options);
+
+    for (value.array.items, 0..) |item, index| {
+        if (item != .object) {
+            return error.InvalidMessage;
+        }
+
+        const claim_tile_ids_value = item.object.get("claim_tile_ids") orelse return error.InvalidMessage;
+        if (claim_tile_ids_value != .array or claim_tile_ids_value.array.items.len != 2) {
+            return error.InvalidMessage;
+        }
+        const first = claim_tile_ids_value.array.items[0];
+        const second = claim_tile_ids_value.array.items[1];
+        if (first != .integer or second != .integer) {
+            return error.InvalidMessage;
+        }
+
+        chi_options[index] = .{
+            .claim_tile_ids = .{
+                std.math.cast(u8, first.integer) orelse return error.InvalidMessage,
+                std.math.cast(u8, second.integer) orelse return error.InvalidMessage,
+            },
+        };
+    }
+
+    return chi_options;
+}
+
 fn parseScores(value: std.json.Value) ![4]i32 {
     if (value != .array or value.array.items.len != 4) {
         return error.InvalidMessage;
@@ -304,6 +422,12 @@ fn getStringField(object: std.json.ObjectMap, field_name: []const u8) ![]const u
     return value.string;
 }
 
+/// 解析必要 enum 欄位，確保 JSON 字串能對應到合法列舉值。
+fn parseEnumField(object: std.json.ObjectMap, field_name: []const u8, comptime Enum: type) !Enum {
+    const value = try getStringField(object, field_name);
+    return std.meta.stringToEnum(Enum, value) orelse return error.InvalidMessage;
+}
+
 fn getIntField(object: std.json.ObjectMap, field_name: []const u8, comptime Int: type) !Int {
     const value = object.get(field_name) orelse return error.InvalidMessage;
     if (value != .integer) {
@@ -321,6 +445,36 @@ fn parseOptionalIntField(object: std.json.ObjectMap, field_name: []const u8, com
         return error.InvalidMessage;
     }
     return std.math.cast(Int, value.integer) orelse return error.InvalidMessage;
+}
+
+/// 解析可選 enum 欄位，欄位不存在或為 null 時回傳 null。
+fn parseOptionalEnumField(object: std.json.ObjectMap, field_name: []const u8, comptime Enum: type) !?Enum {
+    const value = object.get(field_name) orelse return null;
+    if (value == .null) return null;
+    if (value != .string) return error.InvalidMessage;
+    return std.meta.stringToEnum(Enum, value.string) orelse return error.InvalidMessage;
+}
+
+/// 解析可選的 u8 陣列欄位，供 claim_tile_ids 這類 payload 使用。
+fn parseOptionalU8List(allocator: std.mem.Allocator, object: std.json.ObjectMap, field_name: []const u8) !?[]u8 {
+    const value = object.get(field_name) orelse return null;
+    if (value == .null) return null;
+
+    if (value != .array) {
+        return error.InvalidMessage;
+    }
+
+    const output = try allocator.alloc(u8, value.array.items.len);
+    errdefer allocator.free(output);
+
+    for (value.array.items, 0..) |item, index| {
+        if (item != .integer) {
+            return error.InvalidMessage;
+        }
+        output[index] = std.math.cast(u8, item.integer) orelse return error.InvalidMessage;
+    }
+
+    return output;
 }
 
 test "player_action message roundtrip" {
@@ -346,11 +500,38 @@ test "player_action message roundtrip" {
     }
 }
 
+test "player_action message roundtrip with chi claim_tile_ids" {
+    const allocator = std.testing.allocator;
+    const claim_tile_ids = [_]u8{ 3, 4 };
+    const message: Message = .{ .player_action = .{
+        .action = .chi,
+        .tile_id = null,
+        .claim_tile_ids = &claim_tile_ids,
+    } };
+
+    var writer: std.Io.Writer.Allocating = .init(allocator);
+    defer writer.deinit();
+    try sendMessage(&writer.writer, message);
+
+    var parsed = try parseMessage(allocator, writer.written());
+    defer parsed.deinit(allocator);
+
+    switch (parsed) {
+        .player_action => |payload| {
+            try std.testing.expectEqual(ActionType.chi, payload.action);
+            try std.testing.expect(payload.claim_tile_ids != null);
+            try std.testing.expectEqualSlices(u8, &claim_tile_ids, payload.claim_tile_ids.?);
+        },
+        else => return error.TestUnexpectedResult,
+    }
+}
+
 test "turn_changed message roundtrip" {
     const allocator = std.testing.allocator;
     const actions = [_]ActionType{ .chi, .pon, .discard };
     const message: Message = .{ .turn_changed = .{
         .player_id = 2,
+        .phase_kind = .self_turn,
         .available_actions = &actions,
     } };
 
@@ -364,10 +545,81 @@ test "turn_changed message roundtrip" {
     switch (parsed) {
         .turn_changed => |payload| {
             try std.testing.expectEqual(@as(u8, 2), payload.player_id);
+            try std.testing.expectEqual(PhaseKind.self_turn, payload.phase_kind);
             try std.testing.expectEqual(@as(usize, 3), payload.available_actions.len);
             try std.testing.expectEqual(ActionType.chi, payload.available_actions[0]);
             try std.testing.expectEqual(ActionType.pon, payload.available_actions[1]);
             try std.testing.expectEqual(ActionType.discard, payload.available_actions[2]);
+        },
+        else => return error.TestUnexpectedResult,
+    }
+}
+
+test "turn_changed message roundtrip with discard reaction context" {
+    const allocator = std.testing.allocator;
+    const actions = [_]ActionType{ .chi, .pass };
+    const chi_options = [_]ChiOption{
+        .{ .claim_tile_ids = .{ 1, 2 } },
+        .{ .claim_tile_ids = .{ 2, 4 } },
+    };
+    const message: Message = .{ .turn_changed = .{
+        .player_id = 0,
+        .phase_kind = .discard_reaction,
+        .available_actions = &actions,
+        .discarded_tile_id = 8,
+        .discarder_player_id = 3,
+        .priority_group = .chi,
+        .chi_options = &chi_options,
+    } };
+
+    var writer: std.Io.Writer.Allocating = .init(allocator);
+    defer writer.deinit();
+    try sendMessage(&writer.writer, message);
+
+    var parsed = try parseMessage(allocator, writer.written());
+    defer parsed.deinit(allocator);
+
+    switch (parsed) {
+        .turn_changed => |payload| {
+            try std.testing.expectEqual(@as(u8, 0), payload.player_id);
+            try std.testing.expectEqual(PhaseKind.discard_reaction, payload.phase_kind);
+            try std.testing.expectEqual(@as(?u8, 8), payload.discarded_tile_id);
+            try std.testing.expectEqual(@as(?u8, 3), payload.discarder_player_id);
+            try std.testing.expectEqual(PriorityGroup.chi, payload.priority_group);
+            try std.testing.expectEqual(@as(usize, 2), payload.chi_options.len);
+            try std.testing.expectEqualSlices(u8, &[_]u8{ 1, 2 }, &payload.chi_options[0].claim_tile_ids);
+            try std.testing.expectEqualSlices(u8, &[_]u8{ 2, 4 }, &payload.chi_options[1].claim_tile_ids);
+        },
+        else => return error.TestUnexpectedResult,
+    }
+}
+
+test "turn_changed message supports empty const chi_options slice" {
+    const allocator = std.testing.allocator;
+    const actions = [_]ActionType{ .pass };
+    const message: Message = .{ .turn_changed = .{
+        .player_id = 1,
+        .phase_kind = .discard_reaction,
+        .available_actions = &actions,
+        .discarded_tile_id = 11,
+        .discarder_player_id = 0,
+        .priority_group = .chi,
+        .chi_options = &.{},
+    } };
+
+    var writer: std.Io.Writer.Allocating = .init(allocator);
+    defer writer.deinit();
+    try sendMessage(&writer.writer, message);
+
+    var parsed = try parseMessage(allocator, writer.written());
+    defer parsed.deinit(allocator);
+
+    switch (parsed) {
+        .turn_changed => |payload| {
+            try std.testing.expectEqual(@as(u8, 1), payload.player_id);
+            try std.testing.expectEqual(PhaseKind.discard_reaction, payload.phase_kind);
+            try std.testing.expectEqual(PriorityGroup.chi, payload.priority_group);
+            try std.testing.expectEqual(@as(usize, 0), payload.chi_options.len);
         },
         else => return error.TestUnexpectedResult,
     }

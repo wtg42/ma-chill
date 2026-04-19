@@ -69,7 +69,7 @@ const GameDriver = struct {
         if (turn_changed.player_id == 0) {
             return self.session.receivePlayerAction();
         }
-        return ai.agent.decide(gs, turn_changed.player_id, ai.agent.presets.conservative, turn_changed.available_actions);
+        return ai.agent.decide(gs, turn_changed, ai.agent.presets.conservative);
     }
 
     /// claim_decider：同 turnDecide 邏輯。
@@ -77,7 +77,7 @@ const GameDriver = struct {
         if (turn_changed.player_id == 0) {
             return self.session.receivePlayerAction();
         }
-        return ai.agent.decide(gs, turn_changed.player_id, ai.agent.presets.conservative, turn_changed.available_actions);
+        return ai.agent.decide(gs, turn_changed, ai.agent.presets.conservative);
     }
 
     /// 只在 AI 玩家階段套用 pacing；真人玩家保持即時可操作。
@@ -191,6 +191,7 @@ test "GameDriver.turnDecide uses AI for non-player-0" {
     var actions = [_]protocol.ActionType{.discard};
     const turn_changed = protocol.TurnChangedMessage{
         .player_id = 1,
+        .phase_kind = .self_turn,
         .available_actions = &actions,
     };
     const action = try driver.turnDecide(&game_state, turn_changed);

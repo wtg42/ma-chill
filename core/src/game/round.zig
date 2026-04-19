@@ -42,9 +42,31 @@ pub fn initGameState(allocator: std.mem.Allocator, shuffled_tiles: []const tile.
 }
 
 pub fn buildTurnChangedMessage(allocator: std.mem.Allocator, game_state: *const state.GameState, player_id: u8, discarded_tile_id: ?u8, discarder_player_id: ?u8) !protocol.TurnChangedMessage {
+    return buildTurnChangedMessageForPriority(allocator, game_state, player_id, discarded_tile_id, discarder_player_id, .none);
+}
+
+/// 依指定優先層級建立 prompt，讓自己回合與棄牌反應窗都能共用同一套 message builder。
+pub fn buildTurnChangedMessageForPriority(allocator: std.mem.Allocator, game_state: *const state.GameState, player_id: u8, discarded_tile_id: ?u8, discarder_player_id: ?u8, priority_group: protocol.PriorityGroup) !protocol.TurnChangedMessage {
+    const phase_kind = if (discarded_tile_id == null) protocol.PhaseKind.self_turn else protocol.PhaseKind.discard_reaction;
+    const all_actions = try availableActionsForPlayer(allocator, game_state, player_id, discarded_tile_id, discarder_player_id);
+    errdefer allocator.free(all_actions);
+    const available_actions = if (priority_group == .none)
+        all_actions
+    else
+        try action_availability.filterActionsForPriority(allocator, all_actions, priority_group);
+    if (priority_group != .none) allocator.free(all_actions);
+    const chi_options = if (discarded_tile_id != null and (priority_group == .none or priority_group == .chi) and action_availability.containsAction(available_actions, .chi))
+        try action_availability.chiOptionsForPlayer(allocator, game_state, player_id, discarded_tile_id, discarder_player_id)
+    else
+        &.{};
     return .{
         .player_id = player_id,
-        .available_actions = try availableActionsForPlayer(allocator, game_state, player_id, discarded_tile_id, discarder_player_id),
+        .phase_kind = phase_kind,
+        .available_actions = available_actions,
+        .discarded_tile_id = discarded_tile_id,
+        .discarder_player_id = discarder_player_id,
+        .priority_group = if (discarded_tile_id == null) .none else priority_group,
+        .chi_options = chi_options,
     };
 }
 
@@ -78,7 +100,7 @@ pub fn playRound(allocator: std.mem.Allocator, game_state: *state.GameState, dri
         }
 
         const turn_changed = try buildTurnChangedMessage(allocator, game_state, game_state.current_player_id, null, null);
-        defer allocator.free(turn_changed.available_actions);
+        defer freeTurnChangedMessage(allocator, turn_changed);
         try driver.sink(.{ .turn_changed = turn_changed });
         try pacePlayer(driver, turn_changed.player_id, .after_turn_prompt);
 
@@ -113,6 +135,7 @@ pub fn playRound(allocator: std.mem.Allocator, game_state: *state.GameState, dri
                         pending_draw = true;
                     },
                     .claim_turn => |claim_turn| {
+                        game_state.turn_count += 1;
                         game_state.current_player_id = claim_turn.player_id;
                         try emitStateUpdate(allocator, game_state, driver);
                         try pacePlayer(driver, claim_turn.player_id, .after_action_resolved);
@@ -144,6 +167,12 @@ pub fn buildInitMessage(allocator: std.mem.Allocator, catalog: []const tile.Tile
     } };
 }
 
+/// 釋放 round 內臨時建立的 turn_changed payload，避免漏掉 chi_options 配置。
+fn freeTurnChangedMessage(allocator: std.mem.Allocator, turn_changed: protocol.TurnChangedMessage) void {
+    allocator.free(turn_changed.available_actions);
+    if (turn_changed.chi_options.len > 0) allocator.free(turn_changed.chi_options);
+}
+
 /// 若 driver 有實作 pace hook，則在指定玩家與 phase 套用節奏控制。
 fn pacePlayer(driver: anytype, player_id: u8, phase: pacing.Phase) !void {
     const DriverType = switch (@typeInfo(@TypeOf(driver))) {
@@ -155,17 +184,35 @@ fn pacePlayer(driver: anytype, player_id: u8, phase: pacing.Phase) !void {
 }
 
 fn resolveClaims(allocator: std.mem.Allocator, game_state: *state.GameState, discarded_tile_id: u8, driver: anytype) !claims.Outcome {
-    var choices: [state.player_count - 1]?claims.ClaimChoice = .{ null, null, null };
-    var choice_count: usize = 0;
     const discarder = game_state.current_player_id;
 
+    if (try resolveClaimsForPriority(allocator, game_state, discarded_tile_id, discarder, .win, driver)) |outcome| {
+        return outcome;
+    }
+    if (try resolveClaimsForPriority(allocator, game_state, discarded_tile_id, discarder, .meld, driver)) |outcome| {
+        return outcome;
+    }
+    if (try resolveClaimsForPriority(allocator, game_state, discarded_tile_id, discarder, .chi, driver)) |outcome| {
+        return outcome;
+    }
+    return .none;
+}
+
+/// 依單一優先層處理棄牌反應，先給玩家，再讓 AI 補位決策。
+fn resolveClaimsForPriority(allocator: std.mem.Allocator, game_state: *state.GameState, discarded_tile_id: u8, discarder: u8, priority_group: protocol.PriorityGroup, driver: anytype) !?claims.Outcome {
+    if (try resolvePlayerClaimForPriority(allocator, game_state, discarded_tile_id, discarder, priority_group, driver)) |outcome| {
+        return outcome;
+    }
+
+    var choices: [state.player_count - 1]?claims.ClaimChoice = .{ null, null, null };
+    var choice_count: usize = 0;
     for (1..state.player_count) |offset| {
         const player_id: u8 = @intCast((discarder + offset) % state.player_count);
-        const turn_changed = try buildTurnChangedMessage(allocator, game_state, player_id, discarded_tile_id, discarder);
-        defer allocator.free(turn_changed.available_actions);
-        if (turn_changed.available_actions.len == 1 and turn_changed.available_actions[0] == .pass) {
-            continue;
-        }
+        if (player_id == 0) continue;
+
+        const turn_changed = try buildTurnChangedMessageForPriority(allocator, game_state, player_id, discarded_tile_id, discarder, priority_group);
+        defer freeTurnChangedMessage(allocator, turn_changed);
+        if (turn_changed.available_actions.len == 0) continue;
 
         try driver.sink(.{ .turn_changed = turn_changed });
         try pacePlayer(driver, player_id, .after_claim_prompt);
@@ -174,11 +221,39 @@ fn resolveClaims(allocator: std.mem.Allocator, game_state: *state.GameState, dis
             return error.IllegalAction;
         }
 
-        choices[choice_count] = .{ .player_id = player_id, .action = claims.mapProtocolAction(response.action) };
+        choices[choice_count] = .{
+            .player_id = player_id,
+            .action = claims.mapProtocolAction(response.action),
+            .claim_tile_ids = try claims.parseClaimTileIds(response),
+        };
         choice_count += 1;
     }
 
-    return claims.resolve(game_state, discarded_tile_id, choices[0..choice_count]);
+    if (choice_count == 0) return null;
+    const outcome = try claims.resolve(game_state, discarded_tile_id, choices[0..choice_count]);
+    return if (outcome == .none) null else outcome;
+}
+
+/// 若玩家在指定優先層具備合法反應，先給玩家 prompt；玩家 pass 後才允許 AI 補位。
+fn resolvePlayerClaimForPriority(allocator: std.mem.Allocator, game_state: *state.GameState, discarded_tile_id: u8, discarder: u8, priority_group: protocol.PriorityGroup, driver: anytype) !?claims.Outcome {
+    if (discarder == 0) return null;
+
+    const turn_changed = try buildTurnChangedMessageForPriority(allocator, game_state, 0, discarded_tile_id, discarder, priority_group);
+    defer freeTurnChangedMessage(allocator, turn_changed);
+    if (turn_changed.available_actions.len == 0) return null;
+
+    try driver.sink(.{ .turn_changed = turn_changed });
+    const response = try driver.claimDecide(game_state, discarded_tile_id, turn_changed);
+    if (!action_availability.containsAction(turn_changed.available_actions, response.action)) {
+        return error.IllegalAction;
+    }
+    if (response.action == .pass) return null;
+
+    return try claims.resolve(game_state, discarded_tile_id, &.{claims.ClaimChoice{
+        .player_id = 0,
+        .action = claims.mapProtocolAction(response.action),
+        .claim_tile_ids = try claims.parseClaimTileIds(response),
+    }});
 }
 
 fn finishWin(game_state: *state.GameState, winner_id: u8, discarded_tile_id: ?u8, self_draw: bool, driver: anytype) !RoundResult {
@@ -320,6 +395,157 @@ test "playRound keeps claimer turn after pon" {
     try std.testing.expect(driver.saw_claim_turn);
 }
 
+test "resolveClaims gives player win priority over AI win on same discard" {
+    const allocator = std.testing.allocator;
+    const catalog = tile.generateCatalog();
+    var game_state = state.GameState.init(allocator);
+    defer game_state.deinit();
+
+    try game_state.players[0].hand.appendSlice(allocator, &[_]tile.Tile{
+        catalog[0], catalog[1], catalog[2],
+        catalog[4], catalog[8], catalog[12],
+        catalog[16], catalog[17], catalog[18],
+        catalog[36], catalog[40], catalog[44],
+        catalog[72], catalog[73], catalog[74],
+        catalog[108],
+    });
+    try game_state.players[2].hand.appendSlice(allocator, &[_]tile.Tile{
+        catalog[0], catalog[1], catalog[2],
+        catalog[4], catalog[8], catalog[12],
+        catalog[16], catalog[17], catalog[18],
+        catalog[36], catalog[40], catalog[44],
+        catalog[72], catalog[73], catalog[74],
+        catalog[108],
+    });
+    game_state.current_player_id = 1;
+
+    const Driver = struct {
+        fn turnDecide(_: *@This(), _: *const state.GameState, _: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            return .{ .action = .discard, .tile_id = null };
+        }
+
+        fn claimDecide(_: *@This(), _: *const state.GameState, _: u8, turn_changed: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            if (turn_changed.player_id == 0) return .{ .action = .win, .tile_id = null };
+            return .{ .action = .win, .tile_id = null };
+        }
+
+        fn sink(_: *@This(), _: protocol.Message) !void {}
+    };
+
+    var driver = Driver{};
+    const outcome = try resolveClaims(allocator, &game_state, catalog[109].id, &driver);
+    try std.testing.expectEqual(@as(claims.Outcome, .{ .win = 0 }), outcome);
+}
+
+test "resolveClaims lets AI take meld after player passes same layer" {
+    const allocator = std.testing.allocator;
+    const catalog = tile.generateCatalog();
+    var game_state = state.GameState.init(allocator);
+    defer game_state.deinit();
+
+    try game_state.players[0].hand.appendSlice(allocator, &[_]tile.Tile{ catalog[1], catalog[2], catalog[40] });
+    try game_state.players[2].hand.appendSlice(allocator, &[_]tile.Tile{ catalog[1], catalog[2], catalog[44] });
+    game_state.current_player_id = 1;
+
+    const Driver = struct {
+        fn turnDecide(_: *@This(), _: *const state.GameState, _: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            return .{ .action = .discard, .tile_id = null };
+        }
+
+        fn claimDecide(_: *@This(), _: *const state.GameState, _: u8, turn_changed: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            if (turn_changed.player_id == 0) return .{ .action = .pass, .tile_id = null };
+            if (turn_changed.player_id == 2) return .{ .action = .pon, .tile_id = null };
+            return .{ .action = .pass, .tile_id = null };
+        }
+
+        fn sink(_: *@This(), _: protocol.Message) !void {}
+    };
+
+    var driver = Driver{};
+    const outcome = try resolveClaims(allocator, &game_state, catalog[0].id, &driver);
+    switch (outcome) {
+        .claim_turn => |claim_turn| try std.testing.expectEqual(@as(u8, 2), claim_turn.player_id),
+        else => return error.TestUnexpectedResult,
+    }
+}
+
+test "resolveClaims prioritizes meld layer over player chi layer" {
+    const allocator = std.testing.allocator;
+    const catalog = tile.generateCatalog();
+    var game_state = state.GameState.init(allocator);
+    defer game_state.deinit();
+
+    try game_state.players[0].hand.appendSlice(allocator, &[_]tile.Tile{ catalog[0], catalog[4], catalog[40] });
+    try game_state.players[2].hand.appendSlice(allocator, &[_]tile.Tile{ catalog[1], catalog[2], catalog[44] });
+    game_state.current_player_id = 3;
+
+    const Driver = struct {
+        player_chi_prompted: bool = false,
+
+        fn turnDecide(_: *@This(), _: *const state.GameState, _: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            return .{ .action = .discard, .tile_id = null };
+        }
+
+        fn claimDecide(self: *@This(), _: *const state.GameState, _: u8, turn_changed: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            if (turn_changed.player_id == 0 and turn_changed.priority_group == .chi) {
+                self.player_chi_prompted = true;
+                return .{ .action = .chi, .tile_id = null };
+            }
+            if (turn_changed.player_id == 2 and turn_changed.priority_group == .meld) {
+                return .{ .action = .pon, .tile_id = null };
+            }
+            return .{ .action = .pass, .tile_id = null };
+        }
+
+        fn sink(_: *@This(), _: protocol.Message) !void {}
+    };
+
+    var driver = Driver{};
+    const outcome = try resolveClaims(allocator, &game_state, catalog[0].id, &driver);
+
+    try std.testing.expect(!driver.player_chi_prompted);
+    switch (outcome) {
+        .claim_turn => |claim_turn| try std.testing.expectEqual(@as(u8, 2), claim_turn.player_id),
+        else => return error.TestUnexpectedResult,
+    }
+}
+
+test "playRound increments turn_count after successful claim turn" {
+    const allocator = std.testing.allocator;
+    const catalog = tile.generateCatalog();
+    var game_state = state.GameState.init(allocator);
+    defer game_state.deinit();
+
+    try game_state.players[0].hand.appendSlice(allocator, catalog[0..16]);
+    try game_state.players[1].hand.appendSlice(allocator, &[_]tile.Tile{ catalog[1], catalog[2], catalog[40] });
+    try game_state.players[2].hand.appendSlice(allocator, catalog[32..48]);
+    try game_state.players[3].hand.appendSlice(allocator, catalog[48..64]);
+    try game_state.wall.append(allocator, catalog[80]);
+    game_state.current_player_id = 0;
+
+    const Driver = struct {
+        fn turnDecide(_: *@This(), gs: *const state.GameState, _: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            if (gs.current_player_id == 0) {
+                return .{ .action = .discard, .tile_id = catalog[0].id };
+            }
+            return .{ .action = .discard, .tile_id = gs.players[gs.current_player_id].hand.items[0].id };
+        }
+
+        fn claimDecide(_: *@This(), _: *const state.GameState, _: u8, turn_changed: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
+            if (turn_changed.player_id == 1 and turn_changed.priority_group == .meld) {
+                return .{ .action = .pon, .tile_id = null };
+            }
+            return .{ .action = .pass, .tile_id = null };
+        }
+
+        fn sink(_: *@This(), _: protocol.Message) !void {}
+    };
+
+    var driver = Driver{};
+    _ = try playRound(allocator, &game_state, &driver);
+    try std.testing.expect(game_state.turn_count >= 2);
+}
+
 test "playRound integrates AI decisions and can end in a win" {
     const allocator = std.testing.allocator;
     const catalog = tile.generateCatalog();
@@ -344,11 +570,11 @@ test "playRound integrates AI decisions and can end in a win" {
         game_over_seen: bool = false,
 
         fn turnDecide(_: *@This(), gs: *const state.GameState, turn_changed: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
-            return @import("../ai/agent.zig").decide(gs, turn_changed.player_id, @import("../ai/agent.zig").presets.conservative, turn_changed.available_actions);
+            return @import("../ai/agent.zig").decide(gs, turn_changed, @import("../ai/agent.zig").presets.conservative);
         }
 
         fn claimDecide(_: *@This(), gs: *const state.GameState, _: u8, turn_changed: protocol.TurnChangedMessage) !protocol.PlayerActionMessage {
-            return @import("../ai/agent.zig").decide(gs, turn_changed.player_id, @import("../ai/agent.zig").presets.conservative, turn_changed.available_actions);
+            return @import("../ai/agent.zig").decide(gs, turn_changed, @import("../ai/agent.zig").presets.conservative);
         }
 
         fn sink(self: *@This(), message: protocol.Message) !void {

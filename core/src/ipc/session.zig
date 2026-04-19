@@ -79,6 +79,7 @@ test "Session.sendMessage writes valid JSONL to stream" {
 
     const message: protocol.Message = .{ .turn_changed = .{
         .player_id = 0,
+        .phase_kind = .self_turn,
         .available_actions = &.{ .discard, .win },
     } };
     try protocol.sendMessage(&buf.writer, message);
@@ -88,4 +89,3 @@ test "Session.sendMessage writes valid JSONL to stream" {
     try std.testing.expect(std.mem.indexOf(u8, output, "\"player_id\":0") != null);
     try std.testing.expect(output[output.len - 1] == '\n');
 }
-

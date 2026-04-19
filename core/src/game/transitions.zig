@@ -51,14 +51,19 @@ pub fn applyClosedKong(game_state: *state.GameState, tile_id: u8) !void {
     try game_state.players[game_state.current_player_id].melds.append(game_state.allocator, state.Meld.init(.closed_kong, &meld_tiles, null));
 }
 
-pub fn applyChiClaim(game_state: *state.GameState, player_id: u8, discarded_tile_id: u8) !void {
+/// 套用吃牌結果，若提供 claim_tile_ids 則依指定 tile id 組成面子。
+pub fn applyChiClaim(game_state: *state.GameState, player_id: u8, discarded_tile_id: u8, claim_tile_ids: ?[2]u8) !void {
     const discarded_tile = tileById(discarded_tile_id) orelse return error.InvalidTile;
-    const ranks = chiSequence(discarded_tile, game_state.players[player_id].hand.items) orelse return error.InvalidTile;
-
     var meld_tiles = [_]u8{ 0, 0, 0 };
     meld_tiles[2] = discarded_tile_id;
-    meld_tiles[0] = try removeTileByRank(game_state, player_id, discarded_tile.suit, ranks[0]);
-    meld_tiles[1] = try removeTileByRank(game_state, player_id, discarded_tile.suit, ranks[1]);
+    if (claim_tile_ids) |selected_ids| {
+        meld_tiles[0] = try removeTileByExactId(game_state, player_id, selected_ids[0], discarded_tile.suit);
+        meld_tiles[1] = try removeTileByExactId(game_state, player_id, selected_ids[1], discarded_tile.suit);
+    } else {
+        const ranks = chiSequence(discarded_tile, game_state.players[player_id].hand.items) orelse return error.InvalidTile;
+        meld_tiles[0] = try removeTileByRank(game_state, player_id, discarded_tile.suit, ranks[0]);
+        meld_tiles[1] = try removeTileByRank(game_state, player_id, discarded_tile.suit, ranks[1]);
+    }
     try game_state.players[player_id].melds.append(game_state.allocator, state.Meld.init(.chi, &meld_tiles, 2));
     game_state.any_claims_made = true;
     game_state.current_player_id = player_id;
@@ -127,6 +132,16 @@ fn hasRank(hand: []const tile.Tile, suit: tile.Suit, rank: tile.Rank) bool {
 fn removeTileByRank(game_state: *state.GameState, player_id: u8, suit: tile.Suit, rank: tile.Rank) !u8 {
     for (game_state.players[player_id].hand.items, 0..) |entry, index| {
         if (entry.suit == suit and entry.rank == rank) {
+            return orderedRemove(&game_state.players[player_id].hand, index).id;
+        }
+    }
+    return error.InvalidTile;
+}
+
+/// 依指定 tile id 移除手牌，並驗證其花色與吃牌目標一致。
+fn removeTileByExactId(game_state: *state.GameState, player_id: u8, tile_id: u8, expected_suit: tile.Suit) !u8 {
+    for (game_state.players[player_id].hand.items, 0..) |entry, index| {
+        if (entry.id == tile_id and entry.suit == expected_suit) {
             return orderedRemove(&game_state.players[player_id].hand, index).id;
         }
     }
@@ -239,11 +254,26 @@ test "applyChiClaim updates melds and current player" {
     try game_state.players[1].hand.appendSlice(allocator, &[_]tile.Tile{ catalog[0], catalog[4], catalog[40] });
     game_state.current_player_id = 0;
 
-    try applyChiClaim(&game_state, 1, catalog[8].id);
+    try applyChiClaim(&game_state, 1, catalog[8].id, null);
 
     try std.testing.expectEqual(@as(usize, 1), game_state.players[1].hand.items.len);
     try std.testing.expectEqual(@as(usize, 1), game_state.players[1].melds.items.len);
     try std.testing.expectEqual(state.MeldType.chi, game_state.players[1].melds.items[0].kind);
     try std.testing.expectEqual(@as(u8, 1), game_state.current_player_id);
     try std.testing.expect(game_state.any_claims_made);
+}
+
+test "applyChiClaim uses explicit claim tile ids" {
+    const allocator = std.testing.allocator;
+    const catalog = tile.generateCatalog();
+    var game_state = state.GameState.init(allocator);
+    defer game_state.deinit();
+
+    try game_state.players[1].hand.appendSlice(allocator, &[_]tile.Tile{ catalog[0], catalog[4], catalog[12], catalog[40] });
+    game_state.current_player_id = 0;
+
+    try applyChiClaim(&game_state, 1, catalog[8].id, .{ catalog[4].id, catalog[12].id });
+
+    try std.testing.expectEqual(@as(usize, 2), game_state.players[1].hand.items.len);
+    try std.testing.expectEqual(catalog[0].id, game_state.players[1].hand.items[0].id);
 }
