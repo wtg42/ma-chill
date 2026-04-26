@@ -14,6 +14,16 @@ interface Props {
   store: GameStateStore;
 }
 
+// 取得分數列專用玩家名稱，讓玩家編號與名稱貼合以降低冒號判讀干擾。
+function scorePlayerLabel(playerId: number): string {
+  return playerId === 0 ? "你" : `玩家${playerId + 1}`;
+}
+
+// 將玩家分數格式化為狀態列文字，冒號後保留空格以清楚分隔名稱與分數。
+export function formatScoreLine(scores: number[]): string {
+  return scores.map((score, index) => `${scorePlayerLabel(index)}: ${score}`).join(" / ");
+}
+
 export function ShellStatusBar(props: Props): JSX.Element {
   const state = () => props.store.gameState();
   const available = () => props.store.availableCommandHints();
@@ -40,7 +50,7 @@ export function ShellStatusBar(props: Props): JSX.Element {
       </text>
       <text>
         <strong>分數</strong>
-        {state() ? `  ${state()!.scores.map((score, index) => `${PLAYER_NAMES[index] ?? `玩家 ${index + 1}`}:${score}`).join(" / ")}` : ""}
+        {state() ? `  ${formatScoreLine(state()!.scores)}` : ""}
       </text>
       <text>
         <strong>可用命令</strong>
