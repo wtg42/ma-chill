@@ -82,13 +82,7 @@ export function GameTable(props: GameTableProps): JSX.Element {
   });
   const discardPickerLayout = createMemo(() => buildDiscardPickerVisualLayout(discardPickerRows()));
   const discardPickerCardStyle = buildDiscardPickerCardStyle();
-  const discardPickerPlacement = createMemo(() => {
-    return buildDiscardPickerPopupPlacement(
-      dimensions().width,
-      dimensions().height,
-      discardPickerLayout().sections,
-    );
-  });
+  const discardPickerPlacement = buildDiscardPickerPopupPlacement();
 
   return (
     <Show
@@ -109,10 +103,14 @@ export function GameTable(props: GameTableProps): JSX.Element {
         />
         <Show when={store.activeDialog() === "discard_picker"}>
           <box
-            position={discardPickerPlacement().position}
-            zIndex={discardPickerPlacement().zIndex}
-            left={discardPickerPlacement().left}
-            top={discardPickerPlacement().top}
+            position={discardPickerPlacement.position}
+            zIndex={discardPickerPlacement.zIndex}
+            left={discardPickerPlacement.left}
+            top={discardPickerPlacement.top}
+            width={discardPickerPlacement.width}
+            height={discardPickerPlacement.height}
+            justifyContent={discardPickerPlacement.justifyContent}
+            alignItems={discardPickerPlacement.alignItems}
           >
             <box
               borderStyle={discardPickerCardStyle.borderStyle}

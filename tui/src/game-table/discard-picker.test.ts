@@ -135,14 +135,17 @@ describe("moveDiscardPickerFocus", () => {
 });
 
 describe("buildDiscardPickerPopupPlacement", () => {
-  it("只建立 popup 卡片定位資訊，不包含 overlay 背景", () => {
-    const layout = buildDiscardPickerVisualLayout(createWrappedRows());
-    const placement = buildDiscardPickerPopupPlacement(120, 40, layout.sections);
+  it("建立滿版透明定位層並用 flex 將 popup 置中", () => {
+    const placement = buildDiscardPickerPopupPlacement();
 
     expect(placement.position).toBe("absolute");
     expect(placement.zIndex).toBe(90);
-    expect(placement.left).toBeGreaterThan(0);
-    expect(placement.top).toBeGreaterThan(0);
+    expect(placement.left).toBe(0);
+    expect(placement.top).toBe(0);
+    expect(placement.width).toBe("100%");
+    expect(placement.height).toBe("100%");
+    expect(placement.justifyContent).toBe("center");
+    expect(placement.alignItems).toBe("center");
     expect("backgroundColor" in placement).toBe(false);
   });
 });

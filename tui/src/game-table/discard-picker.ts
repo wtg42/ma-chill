@@ -27,6 +27,10 @@ export interface DiscardPickerPopupPlacement {
   zIndex: number;
   left: number;
   top: number;
+  width: "100%";
+  height: "100%";
+  justifyContent: "center";
+  alignItems: "center";
 }
 
 export interface DiscardPickerVisualPosition {
@@ -60,9 +64,6 @@ export const DISCARD_PICKER_DIALOG_WIDTH = 64;
 const DISCARD_PICKER_DIALOG_PADDING_X = 2;
 const DISCARD_PICKER_TILE_WIDTH = 7;
 const DISCARD_PICKER_TILE_GAP = 1;
-const DISCARD_PICKER_TILE_HEIGHT = 4;
-const DISCARD_PICKER_CARD_OUTER_WIDTH = DISCARD_PICKER_DIALOG_WIDTH + 4;
-const DISCARD_PICKER_BASE_POPUP_HEIGHT = 8;
 
 // 判斷目前是否具備開啟棄牌 dialog 的基本條件。
 export function canOpenDiscardPicker(availableActions: string[]): boolean {
@@ -197,33 +198,17 @@ export function buildDiscardPickerVisualLayout(
   return { sections, positions };
 }
 
-// 估算 popup 高度，讓卡片定位可大致置中且不需建立全畫面容器。
-function estimateDiscardPickerPopupHeight(sections: DiscardPickerVisualSection[]): number {
-  if (sections.length === 0) {
-    return DISCARD_PICKER_BASE_POPUP_HEIGHT;
-  }
-
-  const sectionRows = sections.reduce((sum, section) => sum + section.visualRows.length, 0);
-  const sectionLabels = sections.length;
-  const gapsBetweenSections = Math.max(0, sections.length - 1);
-  return DISCARD_PICKER_BASE_POPUP_HEIGHT
-    + sectionLabels
-    + sectionRows * DISCARD_PICKER_TILE_HEIGHT
-    + gapsBetweenSections;
-}
-
-// 建立 discard popup 的絕對定位資訊，只讓卡片浮在內容上方而不產生整頁遮罩。
-export function buildDiscardPickerPopupPlacement(
-  viewportWidth: number,
-  viewportHeight: number,
-  sections: DiscardPickerVisualSection[],
-): DiscardPickerPopupPlacement {
-  const popupHeight = estimateDiscardPickerPopupHeight(sections);
+// 建立 discard popup 的滿版透明定位層，交由 flex layout 將卡片置中。
+export function buildDiscardPickerPopupPlacement(): DiscardPickerPopupPlacement {
   return {
     position: "absolute",
     zIndex: 90,
-    left: Math.max(0, Math.floor((viewportWidth - DISCARD_PICKER_CARD_OUTER_WIDTH) / 2)),
-    top: Math.max(0, Math.floor((viewportHeight - popupHeight) / 2)),
+    left: 0,
+    top: 0,
+    width: "100%",
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
   };
 }
 
