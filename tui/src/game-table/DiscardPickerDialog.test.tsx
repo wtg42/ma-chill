@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { DiscardPickerRow } from "./discard-picker";
 import { buildDiscardPickerDialogModel } from "./DiscardPickerDialog";
 import { buildTaiwanMahjongCatalog } from "../tiles";
+import { measureDisplayWidth } from "../tiles/text-render";
 import type { CanonicalTile } from "../tiles/types";
 
 const catalog = buildTaiwanMahjongCatalog();
@@ -37,6 +38,15 @@ describe("DiscardPickerDialog", () => {
     expect(unfocusedItem?.tileLines.every((line) => !("inverse" in line))).toBe(true);
     expect(unfocusedItem?.label.fg).toBeUndefined();
     expect("inverse" in (unfocusedItem?.label ?? {})).toBe(false);
+  });
+
+  it("中文字牌面行不會超過固定牌寬", () => {
+    const model = buildDiscardPickerDialogModel(createRows(), 0);
+    const tileLineWidths = model.visualSections.flatMap((section) => section.visualRows)
+      .flatMap((row) => row.items)
+      .flatMap((item) => item.tileLines.map((line) => measureDisplayWidth(line.content)));
+
+    expect(tileLineWidths.every((width) => width <= 7)).toBe(true);
   });
 
   it("沒有可棄牌時建立空狀態", () => {

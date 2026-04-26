@@ -1,5 +1,5 @@
 import { For, JSX, createMemo } from "solid-js";
-import { renderTileTextTemplate, resolveTileTextTemplateByKey } from "../tiles/text-render";
+import { measureDisplayWidth, renderTileTextTemplate, resolveTileTextTemplateByKey } from "../tiles/text-render";
 import { toTextRenderKey } from "../tiles/display";
 import type { CanonicalTile } from "../tiles/types";
 import type { DiscardPickerRow, DiscardPickerVisualSection } from "./discard-picker";
@@ -63,7 +63,8 @@ function focusedLabel(rows: DiscardPickerRow[], focusedIndex: number): string | 
 
 // 將文字補齊到固定寬度，讓每張牌塊維持一致的可視寬度。
 function padDisplayText(text: string, width: number): string {
-  return text.length >= width ? text : `${text}${" ".repeat(width - text.length)}`;
+  const displayWidth = measureDisplayWidth(text);
+  return displayWidth >= width ? text : `${text}${" ".repeat(width - displayWidth)}`;
 }
 
 // 將牌面文字與焦點狀態轉成可直接渲染的行資料。

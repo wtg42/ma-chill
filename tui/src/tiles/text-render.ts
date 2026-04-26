@@ -113,7 +113,8 @@ export function renderTileTextTemplate(template: TileTextTemplate): string {
   return `┌─────┐\n│${top}│\n│${bottom}│\n└─────┘`;
 }
 
-function displayWidth(s: string): number {
+// 計算字串在終端中的顯示寬度，讓中文字與全形字元依兩格寬處理。
+export function measureDisplayWidth(s: string): number {
   let width = 0;
   for (const char of s) {
     const cp = char.codePointAt(0) ?? 0;
@@ -145,12 +146,13 @@ function displayWidth(s: string): number {
   return width;
 }
 
+// 將輸入文字置中到五格顯示寬度，供 ASCII 牌面固定內框寬度。
 function centerToFive(input: string): string {
-  // Truncate to fit within 5 display columns
+  // 超過五格顯示寬度時截斷，避免破壞牌面邊框。
   let value = "";
   let usedWidth = 0;
   for (const char of input) {
-    const cw = displayWidth(char);
+    const cw = measureDisplayWidth(char);
     if (usedWidth + cw > 5) break;
     value += char;
     usedWidth += cw;
