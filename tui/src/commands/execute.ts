@@ -2,6 +2,7 @@ import { sendAction } from "../connection";
 import type { GameStateStore } from "../game-state";
 import { formatHandSummaryLines } from "../game-state/hand-summary";
 import { formatTileLabel, formatTileShort, tileMatchesToken } from "../tiles";
+import type { CanonicalTile } from "../tiles/types";
 import { describeAllCommands, findCommandDefinition } from "./registry";
 import { parseSlashCommand } from "./parser";
 
@@ -18,6 +19,11 @@ interface CommandDeps {
   sendAction: (action: string, tileId?: number, claimTileIds?: number[]) => void;
 }
 
+interface ResolvedDiscardSelection {
+  tileId: number;
+  display: string;
+}
+
 const ROUND_WIND_ZH: Record<string, string> = {
   east: "東",
   south: "南",
@@ -28,6 +34,7 @@ const ROUND_WIND_ZH: Record<string, string> = {
 const PLAYER_NAMES = ["你", "玩家 2", "玩家 3", "玩家 4"];
 const DEFAULT_DEPS: CommandDeps = { sendAction };
 
+// 執行使用者輸入的 slash command，統一處理回顯、解析、驗證與送出流程。
 export function executeCommand(
   raw: string,
   store: GameStateStore,
@@ -63,6 +70,24 @@ export function executeCommand(
   return executeActionCommand(definition.action ?? definition.name, parsed.command.args, store, deps);
 }
 
+// 以 tile id 直接執行一次棄牌，重用既有 discard 成功路徑。
+export function executeDiscardByTileId(
+  tileId: number,
+  store: GameStateStore,
+  deps: CommandDeps = DEFAULT_DEPS,
+): CommandResult {
+  const tile = store.tileCatalog().get(tileId);
+  return commitDiscardSelection(
+    {
+      tileId,
+      display: formatDiscardSelectionDisplay(tile, String(tileId)),
+    },
+    store,
+    deps,
+  );
+}
+
+// 執行只在 TUI 本地處理的指令，避免不必要的 IPC 往返。
 function executeLocalCommand(name: string, store: GameStateStore): CommandResult {
   if (name === "help") {
     const message = describeAllCommands();
@@ -104,6 +129,7 @@ function executeLocalCommand(name: string, store: GameStateStore): CommandResult
   return { ok: true, message };
 }
 
+// 執行需要對遊戲核心送出 action 的指令，集中處理前置驗證與成功回饋。
 function executeActionCommand(action: string, args: string[], store: GameStateStore, deps: CommandDeps): CommandResult {
   const availableActions = store.availableActions();
   if (!availableActions.includes(action)) {
@@ -133,12 +159,7 @@ function executeActionCommand(action: string, args: string[], store: GameStateSt
       store.appendEvent("error", resolved.message);
       return resolved;
     }
-    store.clearTurnPrompt();
-    deps.sendAction("discard", resolved.tileId);
-    const message = `已送出 /discard ${resolved.display}`;
-    store.setCommandFeedback("success", message);
-    store.appendEvent("system", message);
-    return { ok: true, message };
+    return commitDiscardSelection(resolved, store, deps);
   }
 
   if (action === "chi") {
@@ -171,6 +192,7 @@ function executeActionCommand(action: string, args: string[], store: GameStateSt
   return { ok: true, message };
 }
 
+// 解析 /chi 要使用的吃牌選項，並回傳對應的 claim tile ids。
 function resolveChiOption(args: string[], store: GameStateStore):
   | { ok: true; claimTileIds: number[]; display: string; message: string }
   | { ok: false; message: string } {
@@ -205,6 +227,15 @@ function resolveChiOption(args: string[], store: GameStateStore):
   };
 }
 
+// 將棄牌目標格式化成「短名（中文）」字串，避免成功訊息與事件流看起來像不同張牌。
+function formatDiscardSelectionDisplay(tile: CanonicalTile | undefined, fallback: string): string {
+  if (!tile) {
+    return fallback;
+  }
+  return `${formatTileShort(tile)}（${formatTileLabel(tile)}）`;
+}
+
+// 解析 /discard 的輸入參數，統一支援短 token、drawn 與 tile id。
 function resolveDiscardTile(args: string[], store: GameStateStore):
   | { ok: true; tileId: number; display: string; message: string }
   | { ok: false; message: string } {
@@ -226,7 +257,7 @@ function resolveDiscardTile(args: string[], store: GameStateStore):
     return {
       ok: true,
       tileId: state.drawn_tile_id,
-      display: tile ? formatTileShort(tile) : String(state.drawn_tile_id),
+      display: formatDiscardSelectionDisplay(tile, String(state.drawn_tile_id)),
       message: "",
     };
   }
@@ -244,7 +275,7 @@ function resolveDiscardTile(args: string[], store: GameStateStore):
     return {
       ok: true,
       tileId,
-      display: tile ? formatTileShort(tile) : String(tileId),
+      display: formatDiscardSelectionDisplay(tile, String(tileId)),
       message: "",
     };
   }
@@ -264,7 +295,21 @@ function resolveDiscardTile(args: string[], store: GameStateStore):
   return {
     ok: true,
     tileId: selected.id,
-    display: `${formatTileShort(selected.tile)}（${formatTileLabel(selected.tile)}）`,
+    display: formatDiscardSelectionDisplay(selected.tile, String(selected.id)),
     message: "",
   };
+}
+
+// 將已解析的棄牌選擇送入既有成功路徑，統一 prompt 清理、IPC 與回饋訊息。
+function commitDiscardSelection(
+  resolved: ResolvedDiscardSelection,
+  store: GameStateStore,
+  deps: CommandDeps,
+): CommandResult {
+  store.clearTurnPrompt();
+  deps.sendAction("discard", resolved.tileId);
+  const message = `已送出 /discard ${resolved.display}`;
+  store.setCommandFeedback("success", message);
+  store.appendEvent("system", message);
+  return { ok: true, message };
 }

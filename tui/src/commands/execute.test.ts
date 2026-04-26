@@ -1,8 +1,8 @@
 import { describe, expect, it, mock } from "bun:test";
 import type { GameStateStore } from "../game-state";
 import type { CanonicalTile } from "../tiles/types";
-import { buildTaiwanMahjongCatalog } from "../tiles";
-import { executeCommand } from "./execute";
+import { buildTaiwanMahjongCatalog, formatTileShort } from "../tiles";
+import { executeCommand, executeDiscardByTileId } from "./execute";
 
 const catalog = buildTaiwanMahjongCatalog();
 
@@ -121,6 +121,83 @@ describe("executeCommand", () => {
     expect(result).toEqual({ ok: false, message: "/pass 只能在回應視窗使用。" });
     expect(sendAction).not.toHaveBeenCalled();
   });
+
+  it("keeps discard fallback and tile-id helper consistent", () => {
+    const sendFromCommand = mock(() => {});
+    const sendFromHelper = mock(() => {});
+    const sharedStore = {
+      availableActions: mock(() => ["discard"]),
+      phaseKind: mock(() => "self_turn"),
+      handWithIds: mock(() => [
+        { id: 11, tile: findSuited("characters", 1) },
+        { id: 22, tile: findSuited("circles", 3) },
+      ]),
+      gameState: mock(() => createGameState([11, 22], null)),
+      tileCatalog: mock(() => new Map([
+        [11, findSuited("characters", 1)],
+        [22, findSuited("circles", 3)],
+      ])),
+    };
+    const commandStore = createStoreStub(sharedStore);
+    const helperStore = createStoreStub(sharedStore);
+
+    const commandResult = executeCommand("/discard 22", commandStore, { echo: false }, { sendAction: sendFromCommand });
+    const helperResult = executeDiscardByTileId(22, helperStore, { sendAction: sendFromHelper });
+
+    expect(commandResult).toEqual(helperResult);
+    expect(commandResult.message).toBe("已送出 /discard 3p（三筒）");
+    expect(sendFromCommand).toHaveBeenCalledWith("discard", 22);
+    expect(sendFromHelper).toHaveBeenCalledWith("discard", 22);
+  });
+
+  it("accepts the same short labels used by discard picker rows", () => {
+    const sendAction = mock(() => {});
+    const east = findWind("east");
+    const store = createStoreStub({
+      availableActions: mock(() => ["discard"]),
+      phaseKind: mock(() => "self_turn"),
+      handWithIds: mock(() => [
+        { id: 11, tile: findSuited("circles", 3) },
+        { id: 22, tile: east },
+      ]),
+      gameState: mock(() => createGameState([11, 22], null)),
+      tileCatalog: mock(() => new Map([
+        [11, findSuited("circles", 3)],
+        [22, east],
+      ])),
+    });
+
+    const suitedResult = executeCommand(`/discard ${formatTileShort(findSuited("circles", 3))}`, store, { echo: false }, { sendAction });
+    const honorResult = executeCommand(`/discard ${formatTileShort(east)}`, store, { echo: false }, { sendAction });
+
+    expect(suitedResult.ok).toBe(true);
+    expect(honorResult.ok).toBe(true);
+    expect(suitedResult.message).toBe("已送出 /discard 3p（三筒）");
+    expect(honorResult.message).toBe("已送出 /discard east（東）");
+    expect(sendAction.mock.calls[0]).toEqual(["discard", 11]);
+    expect(sendAction.mock.calls[1]).toEqual(["discard", 22]);
+  });
+
+  it("formats dragon discard success message with short label and chinese label", () => {
+    const sendAction = mock(() => {});
+    const red = findDragon("red");
+    const store = createStoreStub({
+      availableActions: mock(() => ["discard"]),
+      phaseKind: mock(() => "self_turn"),
+      handWithIds: mock(() => [
+        { id: 31, tile: red },
+      ]),
+      gameState: mock(() => createGameState([31], null)),
+      tileCatalog: mock(() => new Map([
+        [31, red],
+      ])),
+    });
+
+    const result = executeCommand("/discard red", store, { echo: false }, { sendAction });
+
+    expect(result).toEqual({ ok: true, message: "已送出 /discard red（中）" });
+    expect(sendAction).toHaveBeenCalledWith("discard", 31);
+  });
 });
 
 function createStoreStub(overrides: Partial<GameStateStoreStub> = {}): GameStateStoreStub {
@@ -180,6 +257,23 @@ function findSuited(suit: "characters" | "circles" | "bamboos", rank: number): C
   const tile = catalog.find((entry) => entry.suit === suit && entry.rank === rank);
   if (!tile) {
     throw new Error(`missing suited tile: ${suit} ${rank}`);
+  }
+  return tile;
+}
+
+function findWind(wind: "east" | "south" | "west" | "north"): CanonicalTile {
+  const tile = catalog.find((entry) => entry.wind === wind);
+  if (!tile) {
+    throw new Error(`missing wind tile: ${wind}`);
+  }
+  return tile;
+}
+
+// 取得測試用三元牌，驗證成功訊息的中英牌名對照。
+function findDragon(dragon: "red" | "green" | "white"): CanonicalTile {
+  const tile = catalog.find((entry) => entry.dragon === dragon);
+  if (!tile) {
+    throw new Error(`missing dragon tile: ${dragon}`);
   }
   return tile;
 }

@@ -3,6 +3,7 @@ schema: spec-driven
 context: |
   語言：繁體中文（zh-tw）
   所有產出物必須用繁體中文撰寫。
+  本專案在實作功能時採用最小覆蓋 TDD 開發：先寫最小必要測試，再實作功能，最後重構，確保核心功能能完整且確實運作。
 
 # Project context (optional)
 # This is shown to AI when creating artifacts.
@@ -22,3 +23,6 @@ context: |
 #       - Always include a "Non-goals" section
 #     tasks:
 #       - Break tasks into chunks of max 2 hours
+rules:
+  tasks:
+    - 實作任務若涉及功能開發，應明確先安排測試，再安排功能實作與後續重構。

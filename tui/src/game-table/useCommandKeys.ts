@@ -7,6 +7,12 @@ import {
   handleEventLogNavigationKey,
   type EventLogNavigationControls,
 } from "./event-log-controls";
+import {
+  buildDiscardPickerRows,
+  canOpenDiscardPicker,
+  discardPickerItemAtIndex,
+  moveDiscardPickerFocus,
+} from "./discard-picker";
 
 export type UiMode = "normal" | "leader" | "command";
 
@@ -18,7 +24,7 @@ export interface LeaderBinding {
 }
 
 export const LEADER_BINDINGS: LeaderBinding[] = [
-  { key: "d", label: "棄摸牌", command: "/discard drawn", action: "discard" },
+  { key: "d", label: "棄牌",   command: "/discard",       action: "discard" },
   { key: "j", label: "吃",     command: "/chi",           action: "chi"     },
   { key: "p", label: "碰",     command: "/pon",           action: "pon"     },
   { key: "k", label: "槓",     command: "/kong",          action: "kong"    },
@@ -43,6 +49,52 @@ function isCtrlModifiedKey(key: KeyEvent): boolean {
   return key.ctrl === true;
 }
 
+// 判斷目前是否正在操作 discard dialog，讓其輸入優先於底部命令列模式。
+function isDiscardPickerOpen(store: GameStateStore): boolean {
+  return store.activeDialog() === "discard_picker";
+}
+
+// 在 discard dialog 開啟時處理本地鍵盤導覽與關閉行為。
+function handleDiscardPickerKey(
+  key: KeyEvent,
+  store: GameStateStore,
+  execute: CommandExecutor,
+): boolean {
+  if (key.name === "escape") {
+    key.preventDefault();
+    store.closeDiscardPicker();
+    return true;
+  }
+
+  const rows = buildDiscardPickerRows(
+    store.handWithIds(),
+    store.gameState()?.drawn_tile_id ?? null,
+    store.tileCatalog(),
+  );
+
+  if (key.name === "return" || key.name === "enter") {
+    const focusedItem = discardPickerItemAtIndex(rows, store.discardPickerFocusIndex());
+    if (!focusedItem) {
+      return false;
+    }
+    key.preventDefault();
+    execute(`/discard ${focusedItem.tileId}`, store, { echo: false });
+    return true;
+  }
+
+  const direction = key.name === "left" || key.name === "right" || key.name === "up" || key.name === "down"
+    ? key.name
+    : null;
+  if (!direction) {
+    return false;
+  }
+
+  const nextIndex = moveDiscardPickerFocus(rows, store.discardPickerFocusIndex(), direction);
+  key.preventDefault();
+  store.setDiscardPickerFocusIndex(nextIndex);
+  return true;
+}
+
 // 處理 Leader 模式下的單鍵綁定，僅接受未帶 Ctrl 的產品鍵位。
 export function handleLeaderKey(
   key: KeyEvent,
@@ -59,6 +111,13 @@ export function handleLeaderKey(
     return false;
   }
   key.preventDefault();
+  if (binding.key === "d") {
+    if (!canOpenDiscardPicker(store.availableActions())) {
+      return false;
+    }
+    store.openDiscardPicker();
+    return true;
+  }
   execute(binding.command, store);
   return true;
 }
@@ -74,6 +133,11 @@ export function createModeKeyHandler(
 ): (key: KeyEvent) => void {
   return (key: KeyEvent) => {
     if (key.eventType !== "press") return;
+
+    if (isDiscardPickerOpen(store)) {
+      handleDiscardPickerKey(key, store, execute);
+      return;
+    }
 
     const mode = getMode();
 

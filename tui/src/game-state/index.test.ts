@@ -90,6 +90,30 @@ describe("useGameState applyTurnChanged", () => {
   });
 });
 
+describe("useGameState discard picker state", () => {
+  it("starts closed with focus at first item", () => {
+    const store = useGameState();
+
+    expect(store.activeDialog()).toBe("none");
+    expect(store.discardPickerFocusIndex()).toBe(0);
+  });
+
+  it("opens and closes discard picker without mixing into ui mode", () => {
+    const store = useGameState();
+
+    store.openDiscardPicker();
+    expect(store.activeDialog()).toBe("discard_picker");
+    expect(store.discardPickerFocusIndex()).toBe(0);
+
+    store.setDiscardPickerFocusIndex(2);
+    expect(store.discardPickerFocusIndex()).toBe(2);
+
+    store.closeDiscardPicker();
+    expect(store.activeDialog()).toBe("none");
+    expect(store.discardPickerFocusIndex()).toBe(0);
+  });
+});
+
 function createInitMessage(state: ZigGameState): ZigInitMessage {
   return {
     type: "init",

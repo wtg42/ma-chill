@@ -107,6 +107,8 @@ export interface CommandFeedback {
   message: string;
 }
 
+export type ActiveDialog = "none" | "discard_picker";
+
 const PLAYER_NAMES = ["你", "玩家 2", "玩家 3", "玩家 4"];
 
 function playerLabel(playerId: number): string {
@@ -229,6 +231,8 @@ export function useGameState() {
   const [eventLog, setEventLog] = createSignal<EventLogEntry[]>([]);
   const [availableCommandHints, setAvailableCommandHints] = createSignal<string[]>(getAlwaysAvailableCommandHints());
   const [phaseKind, setPhaseKind] = createSignal<ZigPhaseKind>("self_turn");
+  const [activeDialog, setActiveDialog] = createSignal<ActiveDialog>("none");
+  const [discardPickerFocusIndex, setDiscardPickerFocusIndexState] = createSignal(0);
   const [claimContext, setClaimContext] = createSignal<ClaimPromptContext>({
     discardedTileId: null,
     discarderPlayerId: null,
@@ -253,6 +257,28 @@ export function useGameState() {
     setCommandFeedbackState({ kind, message });
   }
 
+  // 將棄牌 dialog 相關本地 state 重設為初始值，避免散落多處重複清理。
+  function resetDiscardPickerState(): void {
+    setActiveDialog("none");
+    setDiscardPickerFocusIndexState(0);
+  }
+
+  // 開啟棄牌 dialog，並將焦點重設到第一個可選項。
+  function openDiscardPicker(): void {
+    setActiveDialog("discard_picker");
+    setDiscardPickerFocusIndexState(0);
+  }
+
+  // 關閉棄牌 dialog，避免舊焦點殘留到下一次開啟。
+  function closeDiscardPicker(): void {
+    resetDiscardPickerState();
+  }
+
+  // 更新棄牌 dialog 的焦點索引，供方向鍵導覽使用。
+  function setDiscardPickerFocusIndex(index: number): void {
+    setDiscardPickerFocusIndexState(index);
+  }
+
   function applyInit(msg: ZigInitMessage): void {
     const catalog = buildTileCatalogMap(msg.tile_catalog);
     setTileCatalog(catalog);
@@ -262,6 +288,7 @@ export function useGameState() {
     setPassTimeoutSeconds(msg.pass_timeout_seconds);
     setAvailableCommandHints(getAlwaysAvailableCommandHints());
     setPhaseKind("self_turn");
+    resetDiscardPickerState();
     setClaimContext({
       discardedTileId: null,
       discarderPlayerId: null,
@@ -279,6 +306,7 @@ export function useGameState() {
     setCurrentPlayerId(msg.state.current_player_id);
     setAvailableCommandHints(getAlwaysAvailableCommandHints());
     setPhaseKind("self_turn");
+    resetDiscardPickerState();
     setClaimContext({
       discardedTileId: null,
       discarderPlayerId: null,
@@ -307,6 +335,7 @@ export function useGameState() {
     setAvailableActions(msg.available_actions);
     setCurrentPlayerId(msg.player_id);
     setPhaseKind(msg.phase_kind);
+    resetDiscardPickerState();
     setClaimContext({
       discardedTileId: msg.discarded_tile_id ?? null,
       discarderPlayerId: msg.discarder_player_id ?? null,
@@ -325,6 +354,7 @@ export function useGameState() {
     setAvailableActions([]);
     setAvailableCommandHints(getAlwaysAvailableCommandHints());
     setPhaseKind("self_turn");
+    resetDiscardPickerState();
     setClaimContext({
       discardedTileId: null,
       discarderPlayerId: null,
@@ -342,6 +372,7 @@ export function useGameState() {
     setAvailableActions([]);
     setAvailableCommandHints(getAlwaysAvailableCommandHints());
     setPhaseKind("self_turn");
+    resetDiscardPickerState();
     setClaimContext({
       discardedTileId: null,
       discarderPlayerId: null,
@@ -370,6 +401,8 @@ export function useGameState() {
     eventLog,
     availableCommandHints,
     phaseKind,
+    activeDialog,
+    discardPickerFocusIndex,
     claimContext,
     applyInit,
     applyStateUpdate,
@@ -379,6 +412,9 @@ export function useGameState() {
     appendEvent,
     setCommandInput,
     setCommandFeedback,
+    openDiscardPicker,
+    closeDiscardPicker,
+    setDiscardPickerFocusIndex,
     handWithIds,
     seatWinds,
     passTimeoutSeconds,
